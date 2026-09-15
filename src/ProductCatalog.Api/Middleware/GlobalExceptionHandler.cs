@@ -12,7 +12,10 @@ public class GlobalExceptionHandler : IExceptionHandler
 
     public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken ct)
     {
-        _logger.LogError(exception, "Unhandled exception: {Message}", exception.Message);
+        if (exception is ValidationException)
+            _logger.LogWarning("Request validation failed: {Message}", exception.Message);
+        else
+            _logger.LogError(exception, "Unhandled exception: {Message}", exception.Message);
 
         var (statusCode, title, errors) = exception switch
         {

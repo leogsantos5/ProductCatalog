@@ -1,11 +1,17 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ProductCatalog.Domain.Entities;
 
 namespace ProductCatalog.Infrastructure.Persistence.Configurations;
 
 public class ProductConfiguration : IEntityTypeConfiguration<Product>
 {
+    // datetime2 doesn't store DateTimeKind, so timestamps read back from SQL Server would come out
+    // as Unspecified (serialized without the "Z" suffix). Product always writes UTC, so mark them so.
+    private static readonly ValueConverter<DateTime, DateTime> UtcDateTimeConverter =
+        new(v => v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+
     public void Configure(EntityTypeBuilder<Product> builder)
     {
         builder.ToTable("Products");
@@ -21,6 +27,8 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
         builder.Property(p => p.Description).HasMaxLength(1000);
         builder.Property(p => p.Price).HasColumnType("decimal(18,2)");
         builder.Property(p => p.StockQuantity).IsRequired();
+        builder.Property(p => p.CreatedAt).HasConversion(UtcDateTimeConverter);
+        builder.Property(p => p.UpdatedAt).HasConversion(UtcDateTimeConverter);
 
         // Optimistic concurrency token protecting concurrent stock updates.
         builder.Property(p => p.RowVersion).IsRowVersion();

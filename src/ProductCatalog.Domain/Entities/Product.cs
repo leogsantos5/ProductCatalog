@@ -2,7 +2,6 @@ namespace ProductCatalog.Domain.Entities;
 
 public class Product
 {
-    // Assessment requirement: product IDs must be 6-digit numbers.
     public const int MinId = 100_000;
     public const int MaxId = 999_999;
 

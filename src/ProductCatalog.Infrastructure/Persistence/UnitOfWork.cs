@@ -30,4 +30,8 @@ public class UnitOfWork : IUnitOfWork
             throw new UniqueConstraintViolationException("A record with the same key already exists.", ex);
         }
     }
+
+    // A tracking query returns the already-tracked instance as-is instead of refreshing it from the
+    // database, so a stale entity (and its stale RowVersion) has to be dropped before re-reading.
+    public void DiscardChanges() => _db.ChangeTracker.Clear();
 }

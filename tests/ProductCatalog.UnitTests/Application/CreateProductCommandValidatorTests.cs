@@ -34,6 +34,23 @@ public class CreateProductCommandValidatorTests
     }
 
     [Fact]
+    public void Validate_PriceWithMoreThanTwoDecimals_HasError()
+    {
+        var result = _validator.Validate(new CreateProductCommand("Mouse", null, 19.999m, 10));
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == nameof(CreateProductCommand.Price));
+    }
+
+    [Fact]
+    public void Validate_PriceWithTrailingZeros_HasNoErrors()
+    {
+        var result = _validator.Validate(new CreateProductCommand("Mouse", null, 19.9000m, 10));
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
     public void Validate_NegativeInitialStock_HasError()
     {
         var result = _validator.Validate(new CreateProductCommand("Mouse", null, 19.99m, -1));

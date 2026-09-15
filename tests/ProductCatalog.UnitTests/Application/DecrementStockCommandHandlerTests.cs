@@ -61,10 +61,15 @@ public class DecrementStockCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ConcurrencyConflictOnce_ReloadsAndRetriesSuccessfully()
+    public async Task Handle_ConcurrencyConflictOnce_DiscardsStaleStateAndRetriesOnFreshRead()
     {
-        var product = Product.Create(100001, "Mouse", null, 10m, 20);
-        _repository.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
+        // The second read returns a different instance, as the real repository does once the stale
+        // tracked entity has been discarded — the retry must apply to that fresh state.
+        var stale = Product.Create(100001, "Mouse", null, 10m, 20);
+        var fresh = Product.Create(100001, "Mouse", null, 10m, 18);
+        _repository.SetupSequence(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stale)
+            .ReturnsAsync(fresh);
 
         _unitOfWork.SetupSequence(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()))
@@ -73,7 +78,26 @@ public class DecrementStockCommandHandlerTests
         var result = await _handler.Handle(new DecrementStockCommand(100001, 5), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
+        result.Value!.StockQuantity.Should().Be(13);
+        _unitOfWork.Verify(u => u.DiscardChanges(), Times.Once);
         _repository.Verify(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task Handle_ProductDeletedDuringRetry_ReturnsNotFound()
+    {
+        var product = Product.Create(100001, "Mouse", null, 10m, 20);
+        _repository.SetupSequence(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(product)
+            .ReturnsAsync((Product?)null);
+
+        _unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()));
+
+        var result = await _handler.Handle(new DecrementStockCommand(100001, 5), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorCode.Should().Be(ErrorCodes.NotFound);
     }
 
     [Fact]
@@ -89,5 +113,6 @@ public class DecrementStockCommandHandlerTests
 
         result.IsSuccess.Should().BeFalse();
         result.ErrorCode.Should().Be(ErrorCodes.ConcurrencyConflict);
+        _unitOfWork.Verify(u => u.DiscardChanges(), Times.Exactly(ConcurrencyPolicy.MaxConcurrencyRetries));
     }
 }

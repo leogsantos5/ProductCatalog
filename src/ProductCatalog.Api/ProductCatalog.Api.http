@@ -1,6 +1,48 @@
 @ProductCatalog.Api_HostAddress = http://localhost:5077
+@productId = 100001
 
-GET {{ProductCatalog.Api_HostAddress}}/weatherforecast/
+### List all products
+GET {{ProductCatalog.Api_HostAddress}}/api/products
 Accept: application/json
 
-###
+### Get a product by ID
+GET {{ProductCatalog.Api_HostAddress}}/api/products/{{productId}}
+Accept: application/json
+
+### Create a product
+POST {{ProductCatalog.Api_HostAddress}}/api/products
+Content-Type: application/json
+
+{
+  "name": "ZEISS Anti-Fog Lens",
+  "description": "Lens with long-lasting anti-fog coating",
+  "price": 59.90,
+  "initialStock": 50
+}
+
+### Update a product
+PUT {{ProductCatalog.Api_HostAddress}}/api/products/{{productId}}
+Content-Type: application/json
+
+{
+  "name": "ZEISS Single Vision Lens",
+  "description": "Precision single vision lens with premium anti-reflective coating",
+  "price": 94.90
+}
+
+### Decrement stock
+POST {{ProductCatalog.Api_HostAddress}}/api/products/{{productId}}/decrement-stock/5
+
+### Add to stock
+POST {{ProductCatalog.Api_HostAddress}}/api/products/{{productId}}/add-to-stock/5
+
+### Search products by name (partial, case-insensitive)
+GET {{ProductCatalog.Api_HostAddress}}/api/products/search?name=lens
+Accept: application/json
+
+### Products with stock between min and max (inclusive)
+GET {{ProductCatalog.Api_HostAddress}}/api/products/stock-level?min=0&max=100
+Accept: application/json
+
+### Delete a product
+DELETE {{ProductCatalog.Api_HostAddress}}/api/products/{{productId}}

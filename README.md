@@ -79,12 +79,12 @@ All responses use the envelope `{ "data": ..., "errors": [] }` on success; error
 | GET | `/api/products` | List all products (includes stock) | 200 | – |
 | GET | `/api/products/{id}` | Get a product by ID | 200 | 404 |
 | POST | `/api/products` | Create a product | 201 | 400 (validation) |
-| PUT | `/api/products/{id}` | Update name/description/price | 200 | 400, 404 |
-| DELETE | `/api/products/{id}` | Delete a product | 204 | 404 |
+| PUT | `/api/products/{id}` | Update name/description/price | 200 | 400, 404, 409 (concurrency) |
+| DELETE | `/api/products/{id}` | Delete a product | 204 | 404, 409 (concurrency) |
 | POST | `/api/products/{id}/decrement-stock/{quantity}` | Decrement stock | 200 | 400 (insufficient stock / invalid quantity), 404, 409 (concurrency) |
 | POST | `/api/products/{id}/add-to-stock/{quantity}` | Increment stock | 200 | 400 (invalid quantity), 404, 409 (concurrency) |
 | GET | `/api/products/search?name=` | Partial, case-insensitive name search | 200 | 400 (missing name) |
-| GET | `/api/products/stock-level?min=&max=` | Products with stock in `[min, max]` | 200 | 400 (min > max) |
+| GET | `/api/products/stock-level?min=&max=` | Products with stock in `[min, max]` | 200 | 400 (missing or negative `min`/`max`, min > max) |
 
 ## Design decisions & trade-offs
 
@@ -126,11 +126,16 @@ implementation choices — especially the ones that differ from a "default" appr
   actually provide anyway — it's a reversible linear map, not encryption: two known consecutive
   IDs are enough to recover `a` and predict the rest of the series).
 
-- **Optimistic concurrency on stock updates.** `Product` carries a SQL Server `rowversion`
-  (`RowVersion`) column as an EF Core concurrency token. `decrement-stock` and `add-to-stock` both
-  reload-and-retry (up to 3 attempts) on a `DbUpdateConcurrencyException` (translated to
-  `ConcurrencyConflictException` in `UnitOfWork`), so two concurrent requests against the same
-  product don't silently lose one update. This wasn't explicitly required by the assessment's PDF,
+- **Optimistic concurrency on every write to an existing product.** `Product` carries a SQL Server
+  `rowversion` (`RowVersion`) column as an EF Core concurrency token. Because it covers the whole
+  row, `decrement-stock`, `add-to-stock`, `PUT` and `DELETE` all reload-and-retry (up to 3 attempts)
+  on a `DbUpdateConcurrencyException` (translated to `ConcurrencyConflictException` in
+  `UnitOfWork`), so two concurrent requests against the same product don't silently lose one
+  update, and a `PUT` racing a stock change doesn't fail. Before each retry the handler calls
+  `IUnitOfWork.DiscardChanges()` (clears EF Core's change tracker): a tracking query hands back an
+  already-tracked instance as-is instead of refreshing it from the database, so without that step
+  the retry would reuse the stale entity — and its stale `RowVersion` — and conflict again every
+  time. This wasn't explicitly required by the assessment's PDF,
   but it directly addresses "consider how your implementation would behave under concurrent
   workloads," which was called out separately.
 
@@ -152,7 +157,8 @@ implementation choices — especially the ones that differ from a "default" appr
 - **Case-insensitive partial name search via `LIKE`.** Uses `EF.Functions.Like` with `%name%`
   rather than `.Contains()` + `.ToLower()` in C# — SQL Server's default collation is already
   case-insensitive, and this form translates to a single indexable `LIKE` rather than pulling rows
-  into memory to filter.
+  into memory to filter. `%`, `_` and `[` in the search term are escaped, so user input is matched
+  literally instead of acting as wildcards.
 
 - **SQL Server LocalDB, not SQLite/Postgres.** Chosen for zero extra setup on a Windows machine
   with Visual Studio already installed, and because it matches what most enterprise .NET shops run

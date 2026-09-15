@@ -6,6 +6,8 @@ namespace ProductCatalog.Infrastructure.Persistence.Repositories;
 
 public class ProductRepository : IProductRepository
 {
+    private const string LikeEscapeCharacter = "\\";
+
     private readonly AppDbContext _context;
 
     public ProductRepository(AppDbContext context) => _context = context;
@@ -16,12 +18,17 @@ public class ProductRepository : IProductRepository
     public async Task<IReadOnlyList<Product>> GetAllAsync(CancellationToken ct = default) =>
         await _context.Products.AsNoTracking().OrderBy(p => p.Id).ToListAsync(ct);
 
-    public async Task<IReadOnlyList<Product>> SearchByNameAsync(string name, CancellationToken ct = default) =>
-        await _context.Products
+    public async Task<IReadOnlyList<Product>> SearchByNameAsync(string name, CancellationToken ct = default)
+    {
+        // User input is matched literally — without escaping, "%" or "_" would match every product.
+        var pattern = $"%{EscapeLikePattern(name)}%";
+
+        return await _context.Products
             .AsNoTracking()
-            .Where(p => EF.Functions.Like(p.Name, $"%{name}%"))
+            .Where(p => EF.Functions.Like(p.Name, pattern, LikeEscapeCharacter))
             .OrderBy(p => p.Id)
             .ToListAsync(ct);
+    }
 
     public async Task<IReadOnlyList<Product>> GetByStockRangeAsync(int min, int max, CancellationToken ct = default) =>
         await _context.Products
@@ -37,4 +44,11 @@ public class ProductRepository : IProductRepository
         await _context.Products.AddAsync(product, ct);
 
     public void Remove(Product product) => _context.Products.Remove(product);
+
+    private static string EscapeLikePattern(string value) =>
+        value
+            .Replace(LikeEscapeCharacter, LikeEscapeCharacter + LikeEscapeCharacter)
+            .Replace("%", LikeEscapeCharacter + "%")
+            .Replace("_", LikeEscapeCharacter + "_")
+            .Replace("[", LikeEscapeCharacter + "[");
 }

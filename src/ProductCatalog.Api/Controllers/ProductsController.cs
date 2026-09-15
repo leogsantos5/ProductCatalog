@@ -1,5 +1,6 @@
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using ProductCatalog.Api.Contracts;
 using ProductCatalog.Application.Common;
 using ProductCatalog.Application.Products;
@@ -90,7 +91,7 @@ public class ProductsController : ControllerBase
     }
 
     [HttpGet("stock-level")]
-    public async Task<IActionResult> GetByStockLevel([FromQuery] int min, [FromQuery] int max, CancellationToken ct)
+    public async Task<IActionResult> GetByStockLevel([FromQuery, BindRequired] int min, [FromQuery, BindRequired] int max, CancellationToken ct)
     {
         var result = await _mediator.Send(new GetProductsByStockRangeQuery(min, max), ct);
         return ToActionResult(result);

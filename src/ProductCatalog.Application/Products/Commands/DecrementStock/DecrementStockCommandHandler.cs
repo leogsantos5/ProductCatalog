@@ -21,7 +21,7 @@ public class DecrementStockCommandHandler : IRequestHandler<DecrementStockComman
 
     public async Task<Result<ProductDto>> Handle(DecrementStockCommand request, CancellationToken cancellationToken)
     {
-        for (var attempt = 1; attempt <= ConcurrencyPolicy.MaxStockUpdateRetries; attempt++)
+        for (var attempt = 1; attempt <= ConcurrencyPolicy.MaxConcurrencyRetries; attempt++)
         {
             var product = await _repository.GetByIdAsync(request.Id, cancellationToken);
 
@@ -44,6 +44,7 @@ public class DecrementStockCommandHandler : IRequestHandler<DecrementStockComman
             }
             catch (ConcurrencyConflictException)
             {
+                _unitOfWork.DiscardChanges();
                 _logger.LogWarning(
                     "Concurrency conflict decrementing stock for product {ProductId}, attempt {Attempt}, retrying",
                     request.Id, attempt);
