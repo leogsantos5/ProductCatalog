@@ -1,4 +1,5 @@
 using FluentAssertions;
+using ProductCatalog.Application.Common;
 using ProductCatalog.Application.Products.Queries.SearchProductsByName;
 
 namespace ProductCatalog.UnitTests.Application;
@@ -23,5 +24,14 @@ public class SearchProductsByNameQueryValidatorTests
         var result = _validator.Validate(new SearchProductsByNameQuery(name));
 
         result.IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_PageSizeAboveMaximum_HasError()
+    {
+        var result = _validator.Validate(new SearchProductsByNameQuery("lens", PageSize: Paging.MaxPageSize + 1));
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == nameof(SearchProductsByNameQuery.PageSize));
     }
 }

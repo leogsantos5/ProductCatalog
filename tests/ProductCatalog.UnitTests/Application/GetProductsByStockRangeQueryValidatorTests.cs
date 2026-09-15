@@ -38,4 +38,13 @@ public class GetProductsByStockRangeQueryValidatorTests
 
         result.IsValid.Should().BeFalse();
     }
+
+    [Fact]
+    public void Validate_PageBelowOne_HasError()
+    {
+        var result = _validator.Validate(new GetProductsByStockRangeQuery(0, 100, Page: 0));
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == nameof(GetProductsByStockRangeQuery.Page));
+    }
 }

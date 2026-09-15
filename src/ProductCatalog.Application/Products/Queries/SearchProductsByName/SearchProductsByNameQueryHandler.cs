@@ -4,15 +4,15 @@ using ProductCatalog.Domain.Interfaces;
 
 namespace ProductCatalog.Application.Products.Queries.SearchProductsByName;
 
-public class SearchProductsByNameQueryHandler : IRequestHandler<SearchProductsByNameQuery, Result<IReadOnlyList<ProductDto>>>
+public class SearchProductsByNameQueryHandler : IRequestHandler<SearchProductsByNameQuery, Result<PagedResult<ProductDto>>>
 {
     private readonly IProductRepository _repository;
 
     public SearchProductsByNameQueryHandler(IProductRepository repository) => _repository = repository;
 
-    public async Task<Result<IReadOnlyList<ProductDto>>> Handle(SearchProductsByNameQuery request, CancellationToken cancellationToken)
+    public async Task<Result<PagedResult<ProductDto>>> Handle(SearchProductsByNameQuery request, CancellationToken cancellationToken)
     {
-        var products = await _repository.SearchByNameAsync(request.Name, cancellationToken);
-        return Result<IReadOnlyList<ProductDto>>.Success(products.Select(p => p.ToDto()).ToList());
+        var (products, totalCount) = await _repository.SearchByNameAsync(request.Name, request.Page, request.PageSize, cancellationToken);
+        return Result<PagedResult<ProductDto>>.Success(products.ToPagedResult(request, totalCount));
     }
 }

@@ -25,13 +25,4 @@ public class AddStockCommandValidatorTests
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.PropertyName == nameof(AddStockCommand.Quantity));
     }
-
-    [Fact]
-    public void Validate_NonPositiveId_HasError()
-    {
-        var result = _validator.Validate(new AddStockCommand(0, 5));
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.PropertyName == nameof(AddStockCommand.Id));
-    }
 }

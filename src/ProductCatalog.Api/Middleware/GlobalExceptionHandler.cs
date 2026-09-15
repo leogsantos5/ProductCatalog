@@ -6,35 +6,47 @@ namespace ProductCatalog.Api.Middleware;
 
 public class GlobalExceptionHandler : IExceptionHandler
 {
+    private readonly IProblemDetailsService _problemDetailsService;
     private readonly ILogger<GlobalExceptionHandler> _logger;
 
-    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger) => _logger = logger;
+    public GlobalExceptionHandler(IProblemDetailsService problemDetailsService, ILogger<GlobalExceptionHandler> logger)
+    {
+        _problemDetailsService = problemDetailsService;
+        _logger = logger;
+    }
 
     public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken ct)
     {
-        if (exception is ValidationException)
-            _logger.LogWarning("Request validation failed: {Message}", exception.Message);
+        ProblemDetails problem;
+
+        if (exception is ValidationException validationException)
+        {
+            _logger.LogWarning("Request validation failed: {Message}", validationException.Message);
+
+            var errors = validationException.Errors.GroupBy(e => e.PropertyName)
+                .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray());
+
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            problem = new ValidationProblemDetails(errors) { Status = StatusCodes.Status400BadRequest };
+        }
         else
-            _logger.LogError(exception, "Unhandled exception: {Message}", exception.Message);
-
-        var (statusCode, title, errors) = exception switch
         {
-            ValidationException ve => (StatusCodes.Status400BadRequest, "Validation failed", ve.Errors.Select(e => e.ErrorMessage).ToList()),
-            _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred", new List<string> { "Please try again later." })
-        };
+            _logger.LogError(exception, "Unhandled exception");
 
-        var problem = new ProblemDetails
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status500InternalServerError,
+                Title = "An unexpected error occurred.",
+                Detail = "Please try again later."
+            };
+        }
+
+        return await _problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {
-            Status = statusCode,
-            Title = title,
-            Type = $"https://httpstatuses.com/{statusCode}"
-        };
-
-        if (errors.Count > 0)
-            problem.Extensions["errors"] = errors;
-
-        context.Response.StatusCode = statusCode;
-        await context.Response.WriteAsJsonAsync(problem, ct);
-        return true;
+            HttpContext = context,
+            ProblemDetails = problem,
+            Exception = exception
+        });
     }
 }

@@ -28,6 +28,10 @@ public class UpdateProductCommandHandler : IRequestHandler<UpdateProductCommand,
             if (product is null)
                 return Result<ProductDto>.Failure($"Product {request.Id} was not found.", ErrorCodes.NotFound);
 
+            // Also reached after a conflict: the fresh read has a newer version, so If-Match requests get a 412.
+            if (request.ExpectedVersion is not null && request.ExpectedVersion != product.GetVersion())
+                return Result<ProductDto>.Failure("The product has changed since it was retrieved; reload it and try again.", ErrorCodes.VersionMismatch);
+
             product.Update(request.Name, request.Description, request.Price);
 
             try

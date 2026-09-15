@@ -1,177 +1,250 @@
 # Product Catalog API
 
-A REST API for managing products, built as a take-home technical assessment. It exposes standard
-CRUD for a `Product` entity plus stock management and search endpoints, backed by EF Core
-(code-first) against SQL Server.
+A REST API for managing products: CRUD, stock management, and search by name or stock level. Built
+with ASP.NET Core and EF Core (code-first, SQL Server) as a take-home assessment.
 
 ## Tech stack
 
-- .NET 10 / ASP.NET Core Web API (Controllers)
-- Entity Framework Core 10 (SQL Server, code-first migrations)
-- MediatR (CQRS) + FluentValidation
-- xUnit + Moq + FluentAssertions
-- Swagger / OpenAPI (Swashbuckle)
+- .NET 10, ASP.NET Core Web API (controllers)
+- Entity Framework Core 10 with SQL Server, code-first migrations
+- MediatR (CQRS) and FluentValidation
+- xUnit, Moq and FluentAssertions
+- Swagger UI (Swashbuckle)
 
 ## Architecture
 
-Clean Architecture in four projects, following the dependency rule `Api → Application → Domain`
-and `Infrastructure → Application → Domain` (Domain has no dependency on anything else):
+Clean Architecture in four projects, with dependencies pointing inwards:
+`Api → Application → Domain` and `Infrastructure → Application → Domain`.
 
 ```
 src/
-├── ProductCatalog.Domain          Product entity (rich model, no setters exposed), repository/
-│                                  unit-of-work/ID-generator interfaces. Zero package dependencies.
-├── ProductCatalog.Application     CQRS use cases (MediatR commands/queries + handlers),
-│                                  FluentValidation validators, Result<T>, DTOs.
-├── ProductCatalog.Infrastructure  EF Core AppDbContext, migrations, repository + unit-of-work
-│                                  implementations, ID generator, DB seeding.
-└── ProductCatalog.Api             Thin Controllers, global exception handling, Swagger, DI wiring.
+├── ProductCatalog.Domain          Product entity; repository, unit-of-work and ID-generator
+│                                  interfaces. No package dependencies.
+├── ProductCatalog.Application     Use cases (MediatR commands/queries and handlers),
+│                                  validators, Result<T>, DTOs.
+├── ProductCatalog.Infrastructure  EF Core DbContext, migrations, repository, unit of work,
+│                                  ID generator, seeding.
+└── ProductCatalog.Api             Controller, request contracts, error handling, Swagger.
 tests/
-└── ProductCatalog.UnitTests       Domain, Application (handlers + validators) and Infrastructure
-                                   unit tests (xUnit + Moq + FluentAssertions).
+└── ProductCatalog.UnitTests
 ```
 
-Each use case (e.g. `CreateProduct`) lives in its own folder under
-`Application/Products/Commands` or `Queries`, containing the command/query record, its handler,
-and its validator. Handlers depend only on `IProductRepository` / `IUnitOfWork` abstractions
-defined in `Domain`, never on EF Core directly — `Infrastructure` is the only project that knows
-about SQL Server.
+Each use case has its own folder under `Application/Products/Commands` or `Queries`, holding the
+command or query, its handler and its validator. Handlers only depend on `IProductRepository` and
+`IUnitOfWork`; EF Core stays inside `Infrastructure`.
 
 ## Running locally
 
-**Prerequisites:** .NET 10 SDK, SQL Server LocalDB (installed with Visual Studio, or the
-[SQL Server Express LocalDB](https://learn.microsoft.com/sql/database-engine/configure-windows/sql-server-express-localdb) installer).
+**Prerequisites:** .NET 10 SDK and SQL Server LocalDB (included with Visual Studio, or available as
+the standalone [SQL Server Express LocalDB](https://learn.microsoft.com/sql/database-engine/configure-windows/sql-server-express-localdb) installer).
 
 ```bash
-dotnet restore
-
-# Apply migrations (creates the ProductCatalog database on (localdb)\MSSQLLocalDB)
-dotnet ef database update --project src/ProductCatalog.Infrastructure --startup-project src/ProductCatalog.Api
-
-# Run the API
 dotnet run --project src/ProductCatalog.Api
 ```
 
-The API also **auto-applies pending migrations and seeds sample data on startup when running in
-the `Development` environment** (the default for `dotnet run`), so the `dotnet ef database update`
-step above is a convenience, not a requirement — a fresh clone works with just `dotnet run`. This
-is deliberately **not** done in Release/Production builds; migrations there should be applied as an
-explicit, reviewed step.
+Swagger UI is at `http://localhost:5077/swagger`, and
+`src/ProductCatalog.Api/ProductCatalog.Api.http` has a ready-to-run request for every endpoint.
 
-Swagger UI: `http://localhost:5077/swagger`.
+In the `Development` environment (the default for `dotnet run`) the API applies pending migrations
+and seeds sample products on startup, so a fresh clone needs nothing else. Outside `Development`
+this is skipped on purpose: migrations should be an explicit deployment step.
 
-Connection string lives in `src/ProductCatalog.Api/appsettings.json` (`ConnectionStrings:Default`)
-— it points at LocalDB, so no secrets are involved.
+```bash
+dotnet tool install --global dotnet-ef
+dotnet ef database update --project src/ProductCatalog.Infrastructure --startup-project src/ProductCatalog.Api
+```
 
-### Running tests
+The connection string is `ConnectionStrings:Default` in `src/ProductCatalog.Api/appsettings.json`.
+It points at LocalDB with Windows authentication, so there are no secrets.
+
+### Tests
+
+**Unit tests** need no database:
 
 ```bash
 dotnet test
 ```
 
-## API endpoints
+- **Domain:** `Product` rules (6-digit ID, name, positive price, non-negative initial stock).
+- **Handlers**, with the repository and unit of work mocked:
+  - create: ID already taken at the pre-check or at insert time, and running out of attempts;
+  - update and delete: retry on a concurrency conflict using a fresh read, product deleted during
+    the retry, retries exhausted, and `If-Match` (matching version, stale version, and a conflict
+    after the check, which must end in 412 rather than overwrite);
+  - stock: success, insufficient stock, stock limit exceeded and unknown product;
+  - get by ID, and the paging metadata of the product list.
+- **Validators:** every rule, including price precision, `min <= max` and paging bounds.
+- **API:** error code to HTTP status mapping, `ETag`/`If-Match` parsing, required JSON fields.
+- **Infrastructure:** random ID range and escaping of the search pattern.
 
-All responses use the envelope `{ "data": ..., "errors": [] }` on success; errors are returned as
-[RFC 7807](https://www.rfc-editor.org/rfc/rfc7807) `ProblemDetails`.
+**End-to-end smoke test.** Unit tests can't exercise the SQL itself (atomic updates, `rowversion`
+checks), so `tests/smoke/api-smoke-test.cs` runs against the real API and database, using
+genuinely parallel requests. With the API running, in a second terminal:
 
-| Method | Route | Description | Success | Failure |
+```bash
+dotnet run tests/smoke/api-smoke-test.cs
+```
+
+It works on seeded product `100001`, puts its stock back where it started, and deletes the product
+it creates.
+
+| Area | Scenario | Expected |
+|---|---|---|
+| Stock | 50 parallel decrements, then 50 parallel additions | All 200; stock drops by exactly 50, then returns to its start value |
+| | Decrement more than available | 400, stock unchanged |
+| | 5 parallel requests each taking the whole stock | Exactly one 200, four 400; stock never negative |
+| | Stock change on an unknown product | 404 |
+| | Add stock past `int.MaxValue` | 400 `STOCK_LIMIT_EXCEEDED`, stock unchanged |
+| PUT / DELETE | PUT with the current `ETag` | 200 with a new `ETag` |
+| | PUT with a stale `ETag` | 412 |
+| | PUT without `If-Match` | 200 (last write wins) |
+| | Two simultaneous PUTs with the same `ETag` | One 200, one 412 |
+| | DELETE with a stale `ETag` | 412, product still exists |
+| | DELETE with the current `ETag` | 204 |
+| Create and errors | POST | 201 with `Location` and `ETag` |
+| | POST without `price` | 400, `application/problem+json` |
+| | POST with price `19.999` | 400 with the error under `errors.Price` |
+| | GET an unknown ID | 404 with `errorCode: NOT_FOUND` |
+| | Search for `%` | Matched literally: no results |
+| | `stock-level` without `max` | 400 |
+| Paging | `GET /api/products?page=1&pageSize=2` | Two items, with `page`, `pageSize`, `totalCount` and `totalPages` |
+| | Pages 1 and 2 | No overlap, ordered by ID |
+| | `GET /api/products` | Page 1, page size 50 |
+| | `pageSize=101`, or `page=0` | 400 |
+
+## API
+
+| Method | Route | Description | Success | Errors |
 |---|---|---|---|---|
-| GET | `/api/products` | List all products (includes stock) | 200 | – |
-| GET | `/api/products/{id}` | Get a product by ID | 200 | 404 |
-| POST | `/api/products` | Create a product | 201 | 400 (validation) |
-| PUT | `/api/products/{id}` | Update name/description/price | 200 | 400, 404, 409 (concurrency) |
-| DELETE | `/api/products/{id}` | Delete a product | 204 | 404, 409 (concurrency) |
-| POST | `/api/products/{id}/decrement-stock/{quantity}` | Decrement stock | 200 | 400 (insufficient stock / invalid quantity), 404, 409 (concurrency) |
-| POST | `/api/products/{id}/add-to-stock/{quantity}` | Increment stock | 200 | 400 (invalid quantity), 404, 409 (concurrency) |
-| GET | `/api/products/search?name=` | Partial, case-insensitive name search | 200 | 400 (missing name) |
-| GET | `/api/products/stock-level?min=&max=` | Products with stock in `[min, max]` | 200 | 400 (missing or negative `min`/`max`, min > max) |
+| GET | `/api/products` | List products (paged) | 200 | 400 |
+| GET | `/api/products/{id}` | Get a product | 200 | 404 |
+| POST | `/api/products` | Create a product | 201 | 400, 500 (no free ID found) |
+| PUT | `/api/products/{id}` | Update name, description and price | 200 | 400, 404, 409, 412 |
+| DELETE | `/api/products/{id}` | Delete a product | 204 | 404, 409, 412 |
+| POST | `/api/products/{id}/decrement-stock/{quantity}` | Remove stock | 200 | 400 (invalid quantity or insufficient stock), 404 |
+| POST | `/api/products/{id}/add-to-stock/{quantity}` | Add stock | 200 | 400 (invalid quantity or stock limit exceeded), 404 |
+| GET | `/api/products/search?name={name}` | Partial, case-insensitive name match | 200 | 400 |
+| GET | `/api/products/stock-level?min={min}&max={max}` | Products with stock between `min` and `max`, inclusive | 200 | 400 |
 
-## Design decisions & trade-offs
+Successful responses are wrapped as `{ "data": ... }`, and every product includes its
+`stockQuantity`. The three list endpoints are paged: they take optional `page` (default 1) and
+`pageSize` (default 50, maximum 100) query parameters, order results by ID, and return `page`,
+`pageSize`, `totalCount` and `totalPages` alongside `data`. Errors are [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) responses:
 
-This section exists because the review explicitly asked for documented rationale on
-implementation choices — especially the ones that differ from a "default" approach.
+- **400 validation errors** list the problems per field in `errors`, whether they come from a
+  validator or from a missing or malformed field in the request.
+- **Business errors** include an `errorCode` (`NOT_FOUND`, `INSUFFICIENT_STOCK`,
+  `STOCK_LIMIT_EXCEEDED`, `CONCURRENCY_CONFLICT`, `VERSION_MISMATCH`, `ID_GENERATION_FAILED`) and a
+  readable `detail`.
 
-- **Controllers, not Minimal APIs.** The assessment brief talks about "controllers remaining
-  lightweight," so classic ASP.NET Core Controllers were used instead of Minimal API endpoints,
-  even though Minimal APIs are a perfectly valid modern choice. Controllers here contain no
-  business logic — each action just sends a MediatR command/query and translates the `Result<T>`
-  into an HTTP response.
+Every product carries a `version`, and responses for a single product also return it as an `ETag`
+header. `PUT` and `DELETE` accept it back in an optional `If-Match` header (see Concurrency below).
 
-- **6-digit product ID generation (safe across multiple instances).** IDs are generated
-  application-side as a random number in `[100000, 999999]`. Two layers make this safe under
-  concurrent, multi-instance load:
-  1. A cheap existence pre-check (`SELECT` by ID) avoids hitting the database in the common case.
-  2. The `Id` column is the table's **primary key**, so the database itself rejects a genuine
-     collision (e.g. two instances both winning the pre-check for the same number at the same
-     time). `UnitOfWork` translates that SQL unique-constraint violation into a
-     `UniqueConstraintViolationException`, which `CreateProductCommandHandler` catches and retries
-     (up to 10 attempts) with a new candidate.
+## Design decisions
 
-  The pre-check alone would have a race window; the constraint is what actually guarantees
-  uniqueness regardless of how many instances are running. **Trade-off:** the requirement fixes
-  the ID at 6 digits, capping the space at ~900,000 values — as the number of existing products
-  approaches that ceiling, candidates collide more often and more creates hit the
-  already-exists/unique-constraint path before landing on a free ID. Acceptable here since the
-  exercise's scale is nowhere near that, but worth being explicit about.
+- **Clean Architecture and CQRS for a single entity.** This is more structure than a CRUD this
+  size strictly needs, chosen because the brief asks for professional standards. Each use case is
+  one small command or query with its own handler and validator, so a change stays in one folder
+  and handlers can be unit-tested without HTTP or a database. MediatR also provides a single place
+  for steps every request goes through (logging, validation).
 
-  **Alternative considered:** a SQL `SEQUENCE` combined with an affine bijection
-  (`id = 100000 + (seq * a + b) mod 900000`, with `a` coprime to `900000`, e.g. `a = 524287 =
-  2^19 - 1`) would give the same multi-instance-safe uniqueness — atomically, straight from the
-  database — with zero retries and zero collision probability up to 900,000 *lifetime* inserts,
-  while still producing IDs that don't visibly reveal insertion order. It was set aside for two
-  reasons: it fails deterministically and permanently once 900,000 products have ever been
-  created (even if most were since deleted), whereas the retry approach above only degrades as
-  the *currently live* ID space fills up — a better fit here since deletions are expected; and
-  the assessment only requires uniqueness, not unguessability (which this technique doesn't
-  actually provide anyway — it's a reversible linear map, not encryption: two known consecutive
-  IDs are enough to recover `a` and predict the rest of the series).
+- **Controllers rather than Minimal APIs.** The nine endpoints sit in one attribute-routed
+  controller. It has no logic of its own: each action sends one MediatR request and maps the
+  result to an HTTP response.
 
-- **Optimistic concurrency on every write to an existing product.** `Product` carries a SQL Server
-  `rowversion` (`RowVersion`) column as an EF Core concurrency token. Because it covers the whole
-  row, `decrement-stock`, `add-to-stock`, `PUT` and `DELETE` all reload-and-retry (up to 3 attempts)
-  on a `DbUpdateConcurrencyException` (translated to `ConcurrencyConflictException` in
-  `UnitOfWork`), so two concurrent requests against the same product don't silently lose one
-  update, and a `PUT` racing a stock change doesn't fail. Before each retry the handler calls
-  `IUnitOfWork.DiscardChanges()` (clears EF Core's change tracker): a tracking query hands back an
-  already-tracked instance as-is instead of refreshing it from the database, so without that step
-  the retry would reuse the stale entity — and its stale `RowVersion` — and conflict again every
-  time. This wasn't explicitly required by the assessment's PDF,
-  but it directly addresses "consider how your implementation would behave under concurrent
-  workloads," which was called out separately.
+- **Unique 6-digit IDs across instances.** The application picks a random ID between 100000 and
+  999999. The database primary key is what guarantees uniqueness: if two instances pick the same
+  ID at the same moment, the second insert fails, and `CreateProductCommandHandler` retries with a
+  new ID (up to 10 attempts). A quick existence check before inserting avoids that failed insert in
+  the usual case.
 
-- **Stock underflow is a 400, not a 409.** Decrementing more stock than is available is treated as
-  a client input problem (you asked for something invalid given current state), not a resource
-  conflict — 409 is reserved for the genuine concurrency-conflict case above.
+  Six digits allow 900,000 IDs, so collisions become more likely as the table fills up. That is far
+  beyond the scale of this exercise. A database sequence mapped onto the 6-digit range was also
+  considered. It needs no retries, but it runs out for good after 900,000 inserts, even if most of
+  those products were deleted. Random IDs only get slower as the *live* ID space fills.
 
-- **`Result<T>` instead of exceptions for expected failures.** Not-found, validation, insufficient
-  stock, and concurrency-exhausted are all modelled as `Result<T>.Failure(...)` with an error code,
-  not thrown exceptions — keeps the happy path and the expected failure paths equally explicit in
-  handlers. The global exception handler (`IExceptionHandler`) is reserved for truly unexpected
-  errors and for FluentValidation's `ValidationException` (raised by the MediatR pipeline
-  behaviour), both mapped to `ProblemDetails`.
+- **Concurrency.** The brief doesn't ask for it, but several instances writing the same product at
+  once must not lose updates. Two techniques are used, depending on the kind of write:
 
-- **`AsNoTracking()` on read-only queries.** List/search/stock-range queries don't need EF Core's
-  change tracker, so they skip it; `GetById` (used by update/delete/stock operations, which mutate
-  the entity) keeps tracking enabled.
+  - **Stock changes are a single atomic `UPDATE`.** `decrement-stock` and `add-to-stock` are
+    relative changes, so the database applies them directly
+    (`SET StockQuantity = StockQuantity - @quantity WHERE Id = @id AND StockQuantity >= @quantity`,
+    via `ExecuteUpdateAsync`). Nothing is read first, so there is nothing to go stale: no retries,
+    no conflicts, and stock can never go negative, however many requests arrive together. Additions
+    work the same way: the `WHERE` clause also requires `StockQuantity <= int.MaxValue - @quantity`,
+    so an addition that would overflow matches no row and returns a 400 instead of failing in SQL.
+  - **`PUT` and `DELETE` use optimistic concurrency.** `Product` has a SQL Server `rowversion`
+    column that changes on every write, including the atomic stock updates, exposed as the
+    product's `ETag`. The risk here isn't the milliseconds inside the server but the minutes a user
+    spends on an edit screen: two back-office users open the same product, and whoever saves second
+    silently overwrites the other's change. Sending the `ETag` in `If-Match` prevents that: if the
+    product changed since it was read, the request fails with **412 Precondition Failed** and the
+    client can reload before trying again.
 
-- **Case-insensitive partial name search via `LIKE`.** Uses `EF.Functions.Like` with `%name%`
-  rather than `.Contains()` + `.ToLower()` in C# — SQL Server's default collation is already
-  case-insensitive, and this form translates to a single indexable `LIKE` rather than pulling rows
-  into memory to filter. `%`, `_` and `[` in the search term are escaped, so user input is matched
-  literally instead of acting as wildcards.
+    `If-Match` is optional. Without it, the last write wins: if the row changes between the
+    server's read and save, the handler reloads the product and retries (up to 3 attempts, then
+    409), clearing EF Core's change tracker first so it doesn't reuse the stale entity.
 
-- **SQL Server LocalDB, not SQLite/Postgres.** Chosen for zero extra setup on a Windows machine
-  with Visual Studio already installed, and because it matches what most enterprise .NET shops run
-  in practice.
+- **Status codes.** Asking for more stock than is available, or pushing it past `int.MaxValue`, returns 400, because the request is
+  invalid for the product's current state. 412 means the client's `If-Match` version is out of
+  date; 409 means a request without `If-Match` still conflicted after the retries. An unknown ID returns 404 on every endpoint.
 
-- **Unit tests only — no integration tests, no BDD.** The BDD suite mentioned in the brief is
-  explicitly optional; integration tests were also left out. Both were a deliberate scope cut
-  given the assessment's short turnaround, in favour of thorough unit coverage of the actual
-  business rules (domain invariants, ID-generation retry, concurrency retry, validation) where the
-  real risk of bugs lives. `IProductRepository`/`IUnitOfWork` being interfaces means integration
-  tests (e.g. via `WebApplicationFactory` + a real/containerized SQL Server) could be added later
-  without changing any production code.
+- **`Result<T>` for expected failures.** Not found, insufficient stock and exhausted retries are
+  returned as results with an error code instead of being thrown. Exceptions are reserved for
+  validation failures (raised by the MediatR validation behaviour) and unexpected errors. A global
+  `IExceptionHandler` turns both into Problem Details.
 
-- **Single README instead of multiple docs.** Given the small scope of a single-entity API, one
-  README covers setup, endpoints and rationale — no need for the topic-per-file documentation
-  style that makes sense for a larger, multi-module product.
+- **Validation happens before the handler and matches the database.** Request contracts mark
+  required fields `[JsonRequired]`, so a missing `price` or `initialStock` is rejected instead of
+  silently binding to 0. A MediatR pipeline behaviour then runs the FluentValidation validators for
+  every request, so handlers only ever see valid input. It throws on failure rather than returning a
+  `Result`, because a behaviour shared by every request type can't build each one's typed result;
+  the global exception handler turns it into a 400. The rules mirror the schema: name up to 200
+  characters, description up to 1000, and a positive price with at most two decimals, since the
+  `decimal(18,2)` column would otherwise silently round `19.999` to `20.00`.
+
+- **A rich entity, with stock as the deliberate exception.** `Product` has private setters and a
+  `Create` factory, so it can't be built in an invalid state. The "stock never below zero" rule is
+  the exception: it lives in the atomic `UPDATE`'s `WHERE` clause rather than in an entity method,
+  because checking it in memory would bring back the read-then-write race. Correctness under
+  concurrency was put ahead of keeping every rule inside the entity.
+
+- **EF Core stays in Infrastructure.** `UnitOfWork` translates EF Core's concurrency and
+  duplicate-key exceptions into the Application's own `ConcurrencyConflictException` and
+  `UniqueConstraintViolationException`, so handlers can retry without referencing EF Core.
+  Timestamps are written as UTC, and a value converter marks them as UTC when read back: `datetime2`
+  doesn't store that, so they would otherwise be serialised without the `Z`.
+
+- **HTTP concerns stay in the Api.** Handlers return error codes, not status codes.
+  `ErrorCodeMapper` translates them in one tested place, and an unknown code becomes a 500 instead
+  of being mistaken for a client error. Responses use DTOs mapped by hand (a few lines, checked at
+  compile time) rather than exposing the entity or adding a mapping library. Payloads are wrapped in
+  `{ "data": ... }` so a response can gain fields without breaking clients, which is how the paged
+  endpoints add their paging metadata.
+
+- **Paging on every list endpoint.** The brief defines the list routes without paging, so paging is
+  optional and the routes are unchanged. A default page size of 50 keeps a plain `GET` cheap as the
+  catalogue grows, and the maximum of 100 caps any single response. Results are ordered by ID so
+  pages are stable, and the total comes from a separate `COUNT` query.
+
+- **Name search.** Uses `LIKE '%name%'`; SQL Server's default collation makes it case-insensitive.
+  `%`, `_` and `[` in the search text are escaped, so they're matched literally. A leading wildcard
+  can't use an index, which is fine at this size; a large catalogue would call for full-text search.
+
+- **Unit tests plus a smoke test, no integration test suite.** An automated integration test
+  project and the optional BDD tests were left out to fit the deadline. Unit tests cover the
+  business rules and retry logic, and the smoke test covers what depends on SQL Server (atomic stock
+  updates, `rowversion` conflicts, `If-Match` races). Persistence sits behind interfaces, so a full
+  integration suite (for example `WebApplicationFactory` against a containerised SQL Server) could be
+  added later without changing production code.
+
+- **Pinned package versions.** MediatR stays on 12.x and FluentAssertions on 7.x, the last releases
+  before both moved to commercial licensing.
+
+## Known limitations
+
+- There is no authentication or authorisation, as the brief doesn't ask for it.
+- `If-Match` supports a single strong ETag. Weak ETags or a list of ETags never match, so they get a 412.
+- Without `If-Match`, the last `PUT` wins.
+- Paging uses `OFFSET`/`FETCH`, which slows down on very deep pages; a very large catalogue would
+  call for keyset (cursor) paging.

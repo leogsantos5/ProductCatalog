@@ -15,6 +15,11 @@ public class UpdateProductCommandHandlerTests
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
     private readonly UpdateProductCommandHandler _handler;
 
+    private static readonly byte[] CurrentRowVersion = [0, 0, 0, 0, 0, 0, 7, 209];
+    private static readonly byte[] NewerRowVersion = [0, 0, 0, 0, 0, 0, 7, 210];
+    private const string CurrentVersion = "AAAAAAAAB9E=";
+    private const string StaleVersion = "AAAAAAAAB9A=";
+
     public UpdateProductCommandHandlerTests()
     {
         _handler = new UpdateProductCommandHandler(
@@ -103,5 +108,50 @@ public class UpdateProductCommandHandlerTests
         result.IsSuccess.Should().BeFalse();
         result.ErrorCode.Should().Be(ErrorCodes.ConcurrencyConflict);
         _unitOfWork.Verify(u => u.DiscardChanges(), Times.Exactly(ConcurrencyPolicy.MaxConcurrencyRetries));
+    }
+
+    [Fact]
+    public async Task Handle_ExpectedVersionMatches_UpdatesAndSaves()
+    {
+        var product = Product.Create(100001, "Mouse", "Old", 10m, 5).WithRowVersion(CurrentRowVersion);
+        _repository.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
+
+        var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m, CurrentVersion), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_ExpectedVersionIsStale_ReturnsVersionMismatchWithoutSaving()
+    {
+        var product = Product.Create(100001, "Mouse", "Old", 10m, 5).WithRowVersion(CurrentRowVersion);
+        _repository.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
+
+        var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m, StaleVersion), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorCode.Should().Be(ErrorCodes.VersionMismatch);
+        product.Name.Should().Be("Mouse");
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_ConcurrencyConflictWithExpectedVersion_ReturnsVersionMismatchInsteadOfRetrying()
+    {
+        // The version matched on read, but another write landed before the save.
+        _repository.SetupSequence(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Product.Create(100001, "Mouse", "Old", 10m, 5).WithRowVersion(CurrentRowVersion))
+            .ReturnsAsync(Product.Create(100001, "Mouse", "Old", 10m, 4).WithRowVersion(NewerRowVersion));
+
+        _unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()));
+
+        var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m, CurrentVersion), CancellationToken.None);
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorCode.Should().Be(ErrorCodes.VersionMismatch);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWork.Verify(u => u.DiscardChanges(), Times.Once);
     }
 }

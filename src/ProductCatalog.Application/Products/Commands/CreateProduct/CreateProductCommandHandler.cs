@@ -9,8 +9,6 @@ namespace ProductCatalog.Application.Products.Commands.CreateProduct;
 
 public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand, Result<ProductDto>>
 {
-    // 6-digit ID space is ~900k values; a handful of retries makes collisions (even across
-    // multiple concurrently-running instances) effectively a non-issue at this scale.
     private const int MaxIdGenerationAttempts = 10;
 
     private readonly IProductRepository _repository;
@@ -36,9 +34,6 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
         {
             var candidateId = _idGenerator.NextCandidate();
 
-            // Pre-check avoids hitting the database's unique constraint in the common case,
-            // but the constraint (and the catch below) is what actually guarantees uniqueness
-            // under concurrent instances — this check alone has a race window.
             if (await _repository.ExistsAsync(candidateId, cancellationToken))
                 continue;
 
@@ -53,14 +48,10 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
             catch (UniqueConstraintViolationException)
             {
                 _repository.Remove(product);
-                _logger.LogWarning(
-                    "Product ID {CandidateId} collided with a concurrently-created product on attempt {Attempt}, retrying",
-                    candidateId, attempt);
+                _logger.LogWarning("Product ID {CandidateId} collided with a concurrently-created product on attempt {Attempt}, retrying", candidateId, attempt);
             }
         }
 
-        return Result<ProductDto>.Failure(
-            "Could not generate a unique product ID after multiple attempts.",
-            ErrorCodes.IdGenerationFailed);
+        return Result<ProductDto>.Failure("Could not generate a unique product ID after multiple attempts.", ErrorCodes.IdGenerationFailed);
     }
 }

@@ -13,7 +13,7 @@ public class Product
     public DateTime CreatedAt { get; private set; }
     public DateTime UpdatedAt { get; private set; }
 
-    // EF Core row-version concurrency token — protects stock updates under concurrent requests.
+    // Optimistic concurrency token for PUT and DELETE; SQL Server also bumps it on atomic stock updates.
     public byte[] RowVersion { get; private set; } = [];
 
     private Product() { }
@@ -40,27 +40,6 @@ public class Product
         SetName(name);
         Description = description;
         SetPrice(price);
-        UpdatedAt = DateTime.UtcNow;
-    }
-
-    public void DecrementStock(int quantity)
-    {
-        if (quantity <= 0)
-            throw new ArgumentOutOfRangeException(nameof(quantity), "Quantity must be greater than zero.");
-
-        if (quantity > StockQuantity)
-            throw new InvalidOperationException($"Insufficient stock: requested {quantity}, available {StockQuantity}.");
-
-        StockQuantity -= quantity;
-        UpdatedAt = DateTime.UtcNow;
-    }
-
-    public void AddStock(int quantity)
-    {
-        if (quantity <= 0)
-            throw new ArgumentOutOfRangeException(nameof(quantity), "Quantity must be greater than zero.");
-
-        StockQuantity += quantity;
         UpdatedAt = DateTime.UtcNow;
     }
 

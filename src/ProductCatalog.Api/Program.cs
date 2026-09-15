@@ -1,8 +1,6 @@
-using Microsoft.EntityFrameworkCore;
 using ProductCatalog.Api.Middleware;
 using ProductCatalog.Application;
 using ProductCatalog.Infrastructure;
-using ProductCatalog.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +17,7 @@ builder.Services.AddSwaggerGen(options =>
         Title = "Product Catalog API",
         Version = "v1"
     });
+    options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml"));
 });
 
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -31,19 +30,12 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 
-    // Auto-apply migrations + seed on startup in dev, so `dotnet run` is enough to get a
-    // working database — deliberately not done this way in production (see README).
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
-    await DbSeeder.SeedAsync(db);
+    await app.Services.InitialiseDatabaseAsync();
 }
 
 app.UseExceptionHandler();
 
 app.UseHttpsRedirection();
-
-app.UseAuthorization();
 
 app.MapControllers();
 

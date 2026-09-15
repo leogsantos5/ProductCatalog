@@ -1,11 +1,16 @@
 @ProductCatalog.Api_HostAddress = http://localhost:5077
 @productId = 100001
 
-### List all products
+### List products (page 1, 50 per page by default)
 GET {{ProductCatalog.Api_HostAddress}}/api/products
 Accept: application/json
 
-### Get a product by ID
+### List products, second page of 2
+GET {{ProductCatalog.Api_HostAddress}}/api/products?page=2&pageSize=2
+Accept: application/json
+
+### Get a product by ID (its ETag header is reused by the If-Match requests below)
+# @name getProduct
 GET {{ProductCatalog.Api_HostAddress}}/api/products/{{productId}}
 Accept: application/json
 
@@ -28,6 +33,28 @@ Content-Type: application/json
   "name": "ZEISS Single Vision Lens",
   "description": "Precision single vision lens with premium anti-reflective coating",
   "price": 94.90
+}
+
+### Update only if unchanged since "Get a product by ID" ran (412 if anything changed it in between)
+PUT {{ProductCatalog.Api_HostAddress}}/api/products/{{productId}}
+Content-Type: application/json
+If-Match: {{getProduct.response.headers.ETag}}
+
+{
+  "name": "ZEISS Single Vision Lens",
+  "description": "Precision single vision lens with premium anti-reflective coating",
+  "price": 89.90
+}
+
+### Update with a stale ETag (always 412)
+PUT {{ProductCatalog.Api_HostAddress}}/api/products/{{productId}}
+Content-Type: application/json
+If-Match: "AAAAAAAAAAE="
+
+{
+  "name": "ZEISS Single Vision Lens",
+  "description": "Precision single vision lens with premium anti-reflective coating",
+  "price": 89.90
 }
 
 ### Decrement stock

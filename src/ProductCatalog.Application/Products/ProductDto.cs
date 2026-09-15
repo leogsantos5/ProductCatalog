@@ -7,4 +7,5 @@ public record ProductDto(
     decimal Price,
     int StockQuantity,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    string Version);

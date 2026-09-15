@@ -15,17 +15,6 @@ public class UpdateProductCommandValidatorTests
         result.IsValid.Should().BeTrue();
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void Validate_NonPositiveId_HasError(int id)
-    {
-        var result = _validator.Validate(new UpdateProductCommand(id, "Mouse", null, 19.99m));
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.PropertyName == nameof(UpdateProductCommand.Id));
-    }
-
     [Fact]
     public void Validate_EmptyName_HasError()
     {

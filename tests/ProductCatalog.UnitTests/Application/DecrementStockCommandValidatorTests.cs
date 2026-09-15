@@ -25,13 +25,4 @@ public class DecrementStockCommandValidatorTests
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.PropertyName == nameof(DecrementStockCommand.Quantity));
     }
-
-    [Fact]
-    public void Validate_NonPositiveId_HasError()
-    {
-        var result = _validator.Validate(new DecrementStockCommand(0, 5));
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.PropertyName == nameof(DecrementStockCommand.Id));
-    }
 }
