@@ -11,18 +11,18 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
 {
     private const int MaxIdGenerationAttempts = 10;
 
-    private readonly IProductRepository _repository;
+    private readonly IProductRepository _productRepo;
     private readonly IProductIdGenerator _idGenerator;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CreateProductCommandHandler> _logger;
 
     public CreateProductCommandHandler(
-        IProductRepository repository,
+        IProductRepository productRepo,
         IProductIdGenerator idGenerator,
         IUnitOfWork unitOfWork,
         ILogger<CreateProductCommandHandler> logger)
     {
-        _repository = repository;
+        _productRepo = productRepo;
         _idGenerator = idGenerator;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -34,11 +34,11 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
         {
             var candidateId = _idGenerator.NextCandidate();
 
-            if (await _repository.ExistsAsync(candidateId, cancellationToken))
+            if (await _productRepo.ExistsAsync(candidateId, cancellationToken))
                 continue;
 
             var product = Product.Create(candidateId, request.Name, request.Description, request.Price, request.InitialStock);
-            await _repository.AddAsync(product, cancellationToken);
+            await _productRepo.AddAsync(product, cancellationToken);
 
             try
             {
@@ -47,7 +47,7 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
             }
             catch (UniqueConstraintViolationException)
             {
-                _repository.Remove(product);
+                _productRepo.Remove(product);
                 _logger.LogWarning("Product ID {CandidateId} collided with a concurrently-created product on attempt {Attempt}, retrying", candidateId, attempt);
             }
         }

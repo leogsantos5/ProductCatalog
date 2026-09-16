@@ -8,7 +8,7 @@ with ASP.NET Core and EF Core (code-first, SQL Server) as a take-home assessment
 - .NET 10, ASP.NET Core Web API (controllers)
 - Entity Framework Core 10 with SQL Server, code-first migrations
 - MediatR (CQRS) and FluentValidation
-- xUnit, Moq and FluentAssertions
+- xUnit, Moq and FluentAssertions; Reqnroll (BDD) with `WebApplicationFactory`
 - Swagger UI (Swashbuckle)
 
 ## Architecture
@@ -26,7 +26,8 @@ src/
 │                                  ID generator, seeding.
 └── ProductCatalog.Api             Controller, request contracts, error handling, Swagger.
 tests/
-└── ProductCatalog.UnitTests
+├── ProductCatalog.UnitTests         Fast tests with mocks: domain, handlers, validators, API helpers.
+└── ProductCatalog.AcceptanceTests   BDD scenarios (Reqnroll) against the real API and SQL Server.
 ```
 
 Each use case has its own folder under `Application/Products/Commands` or `Queries`, holding the
@@ -59,11 +60,15 @@ It points at LocalDB with Windows authentication, so there are no secrets.
 
 ### Tests
 
-**Unit tests** need no database:
-
 ```bash
 dotnet test
 ```
+
+This runs both test projects. The acceptance tests need SQL Server LocalDB: they create their own
+`ProductCatalog_AcceptanceTests` database, empty it before every scenario and drop it at the end,
+so the development database is never touched.
+
+**Unit tests** (`tests/ProductCatalog.UnitTests`) run in memory, without a database:
 
 - **Domain:** `Product` rules (6-digit ID, name, positive price, non-negative initial stock).
 - **Handlers**, with the repository and unit of work mocked:
@@ -77,40 +82,25 @@ dotnet test
 - **API:** error code to HTTP status mapping, `ETag`/`If-Match` parsing, required JSON fields.
 - **Infrastructure:** random ID range and escaping of the search pattern.
 
-**End-to-end smoke test.** Unit tests can't exercise the SQL itself (atomic updates, `rowversion`
-checks), so `tests/smoke/api-smoke-test.cs` runs against the real API and database, using
-genuinely parallel requests. With the API running, in a second terminal:
+**Acceptance tests** (`tests/ProductCatalog.AcceptanceTests`) are BDD scenarios written in Gherkin
+(Given/When/Then) and run with Reqnroll. They start the real API in memory with
+`WebApplicationFactory`, so every request goes through routing, validation, EF Core and SQL Server.
+That covers what unit tests can't: the atomic stock SQL, `rowversion` conflicts, and requests that
+genuinely run at the same time.
 
-```bash
-dotnet run tests/smoke/api-smoke-test.cs
+```gherkin
+Scenario: Simultaneous sales never oversell
+  Given a product "Lens" with 5 units in stock
+  When 5 customers each buy 5 units of "Lens" at the same time
+  Then 1 request succeeds and 4 are rejected with error code "INSUFFICIENT_STOCK"
+  And "Lens" has 0 units in stock
 ```
 
-It works on seeded product `100001`, puts its stock back where it started, and deletes the product
-it creates.
-
-| Area | Scenario | Expected |
-|---|---|---|
-| Stock | 50 parallel decrements, then 50 parallel additions | All 200; stock drops by exactly 50, then returns to its start value |
-| | Decrement more than available | 400, stock unchanged |
-| | 5 parallel requests each taking the whole stock | Exactly one 200, four 400; stock never negative |
-| | Stock change on an unknown product | 404 |
-| | Add stock past `int.MaxValue` | 400 `STOCK_LIMIT_EXCEEDED`, stock unchanged |
-| PUT / DELETE | PUT with the current `ETag` | 200 with a new `ETag` |
-| | PUT with a stale `ETag` | 412 |
-| | PUT without `If-Match` | 200 (last write wins) |
-| | Two simultaneous PUTs with the same `ETag` | One 200, one 412 |
-| | DELETE with a stale `ETag` | 412, product still exists |
-| | DELETE with the current `ETag` | 204 |
-| Create and errors | POST | 201 with `Location` and `ETag` |
-| | POST without `price` | 400, `application/problem+json` |
-| | POST with price `19.999` | 400 with the error under `errors.Price` |
-| | GET an unknown ID | 404 with `errorCode: NOT_FOUND` |
-| | Search for `%` | Matched literally: no results |
-| | `stock-level` without `max` | 400 |
-| Paging | `GET /api/products?page=1&pageSize=2` | Two items, with `page`, `pageSize`, `totalCount` and `totalPages` |
-| | Pages 1 and 2 | No overlap, ordered by ID |
-| | `GET /api/products` | Page 1, page size 50 |
-| | `pageSize=101`, or `page=0` | 400 |
+| Feature | Scenarios |
+|---|---|
+| `StockManagement` | Selling and restocking; selling more than is available (400); 50 simultaneous sales and 50 simultaneous deliveries all counted; 5 buyers competing for the whole stock (exactly one succeeds, stock never negative); restocking past `int.MaxValue` (400); unknown product (404) |
+| `ConcurrentEditing` | Saving with an up-to-date version; saving over someone else's change (412); a sale also makes the retrieved version out of date (412); two users saving at the same moment (one succeeds, one 412); saving without a version (last write wins); deleting with a stale (412) or current version |
+| `ProductCatalogue` | Creating a product (201, 6-digit ID); invalid name, price or stock (400 for that field); missing price (400); unknown product (404); partial, case-insensitive search; `%` matched literally; filtering by stock level, and `min` above `max` (400); paging totals, every product exactly once across pages, page size above 100 (400) |
 
 ## API
 
@@ -231,12 +221,11 @@ header. `PUT` and `DELETE` accept it back in an optional `If-Match` header (see 
   `%`, `_` and `[` in the search text are escaped, so they're matched literally. A leading wildcard
   can't use an index, which is fine at this size; a large catalogue would call for full-text search.
 
-- **Unit tests plus a smoke test, no integration test suite.** An automated integration test
-  project and the optional BDD tests were left out to fit the deadline. Unit tests cover the
-  business rules and retry logic, and the smoke test covers what depends on SQL Server (atomic stock
-  updates, `rowversion` conflicts, `If-Match` races). Persistence sits behind interfaces, so a full
-  integration suite (for example `WebApplicationFactory` against a containerised SQL Server) could be
-  added later without changing production code.
+- **Two layers of tests.** Unit tests pin down the business rules and retry logic quickly, using
+  mocks. The BDD acceptance tests (the brief's optional item) describe the expected outcomes in plain
+  language and check them against the real API and SQL Server, which is the only way to prove the
+  concurrency behaviour. They use LocalDB like the rest of the project; a CI pipeline would point
+  them at a containerised SQL Server instead.
 
 - **Pinned package versions.** MediatR stays on 12.x and FluentAssertions on 7.x, the last releases
   before both moved to commercial licensing.

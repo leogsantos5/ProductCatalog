@@ -6,14 +6,14 @@ namespace ProductCatalog.Application.Products.Commands.AddStock;
 
 public class AddStockCommandHandler : IRequestHandler<AddStockCommand, Result<ProductDto>>
 {
-    private readonly IProductRepository _repository;
+    private readonly IProductRepository _productRepo;
 
-    public AddStockCommandHandler(IProductRepository repository) => _repository = repository;
+    public AddStockCommandHandler(IProductRepository productRepo) => _productRepo = productRepo;
 
     public async Task<Result<ProductDto>> Handle(AddStockCommand request, CancellationToken cancellationToken)
     {
-        var added = await _repository.TryAddStockAsync(request.Id, request.Quantity, cancellationToken);
-        var product = await _repository.GetByIdAsync(request.Id, cancellationToken);
+        var added = await _productRepo.TryAddStockAsync(request.Id, request.Quantity, cancellationToken);
+        var product = await _productRepo.GetByIdAsync(request.Id, cancellationToken);
 
         if (product is null)
             return Result<ProductDto>.Failure($"Product {request.Id} was not found.", ErrorCodes.NotFound);

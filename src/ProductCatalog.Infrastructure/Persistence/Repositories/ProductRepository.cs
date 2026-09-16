@@ -20,7 +20,6 @@ public class ProductRepository : IProductRepository
 
     public Task<(IReadOnlyList<Product> Items, int TotalCount)> SearchByNameAsync(string name, int page, int pageSize, CancellationToken ct = default)
     {
-        // User input is matched literally — without escaping, "%" or "_" would match every product.
         var pattern = $"%{EscapeLikePattern(name)}%";
 
         return ToPageAsync(_context.Products.AsNoTracking().Where(p => EF.Functions.Like(p.Name, pattern, LikeEscapeCharacter)), page, pageSize, ct);
@@ -41,7 +40,7 @@ public class ProductRepository : IProductRepository
 
         var affectedRows = await _context.Products.Where(p => p.Id == id && p.StockQuantity >= quantity)
                                                   .ExecuteUpdateAsync(s => s.SetProperty(p => p.StockQuantity, p => p.StockQuantity - quantity)
-                                                  .SetProperty(p => p.UpdatedAt, now), ct);
+                                                                            .SetProperty(p => p.UpdatedAt, now), ct);
 
         return affectedRows > 0;
     }
@@ -50,12 +49,9 @@ public class ProductRepository : IProductRepository
     {
         var now = DateTime.UtcNow;
 
-        var affectedRows = await _context.Products
-            .Where(p => p.Id == id && p.StockQuantity <= int.MaxValue - quantity)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(p => p.StockQuantity, p => p.StockQuantity + quantity)
-                .SetProperty(p => p.UpdatedAt, now), ct);
-
+        var affectedRows = await _context.Products.Where(p => p.Id == id && p.StockQuantity <= int.MaxValue - quantity)
+                                                  .ExecuteUpdateAsync(s => s.SetProperty(p => p.StockQuantity, p => p.StockQuantity + quantity)
+                                                                            .SetProperty(p => p.UpdatedAt, now), ct);
         return affectedRows > 0;
     }
 

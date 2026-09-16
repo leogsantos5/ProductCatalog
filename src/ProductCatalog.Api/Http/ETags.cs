@@ -1,21 +1,27 @@
+using Microsoft.Net.Http.Headers;
+
 namespace ProductCatalog.Api.Http;
 
 public static class ETags
 {
+    private const string UnmatchableVersion = "unmatchable";
+
     public static string Format(string version) => $"\"{version}\"";
 
-    // Returns the version the client expects, or null when there's no precondition (header absent or "*").
-    // Only a single strong ETag is supported; anything else can never match, so it ends in a 412.
     public static string? ParseIfMatch(string? ifMatch)
     {
         if (string.IsNullOrWhiteSpace(ifMatch))
             return null;
 
-        var value = ifMatch.Trim();
-
-        if (value == "*")
+        if (ifMatch.Trim() == "*")
             return null;
 
-        return value.Length >= 2 && value.StartsWith('"') && value.EndsWith('"') ? value[1..^1] : value;
+        if (!EntityTagHeaderValue.TryParse(ifMatch, out var etag))
+            return UnmatchableVersion;
+
+        if (etag.IsWeak)
+            return UnmatchableVersion;
+
+        return etag.Tag.Value!.Trim('"');
     }
 }

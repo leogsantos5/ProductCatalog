@@ -8,13 +8,13 @@ namespace ProductCatalog.Application.Products.Commands.UpdateProduct;
 
 public class UpdateProductCommandHandler : IRequestHandler<UpdateProductCommand, Result<ProductDto>>
 {
-    private readonly IProductRepository _repository;
+    private readonly IProductRepository _productRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<UpdateProductCommandHandler> _logger;
 
-    public UpdateProductCommandHandler(IProductRepository repository, IUnitOfWork unitOfWork, ILogger<UpdateProductCommandHandler> logger)
+    public UpdateProductCommandHandler(IProductRepository productRepo, IUnitOfWork unitOfWork, ILogger<UpdateProductCommandHandler> logger)
     {
-        _repository = repository;
+        _productRepo = productRepo;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -23,12 +23,11 @@ public class UpdateProductCommandHandler : IRequestHandler<UpdateProductCommand,
     {
         for (var attempt = 1; attempt <= ConcurrencyPolicy.MaxConcurrencyRetries; attempt++)
         {
-            var product = await _repository.GetByIdAsync(request.Id, cancellationToken);
+            var product = await _productRepo.GetByIdAsync(request.Id, cancellationToken);
 
             if (product is null)
                 return Result<ProductDto>.Failure($"Product {request.Id} was not found.", ErrorCodes.NotFound);
 
-            // Also reached after a conflict: the fresh read has a newer version, so If-Match requests get a 412.
             if (request.ExpectedVersion is not null && request.ExpectedVersion != product.GetVersion())
                 return Result<ProductDto>.Failure("The product has changed since it was retrieved; reload it and try again.", ErrorCodes.VersionMismatch);
 
@@ -42,14 +41,10 @@ public class UpdateProductCommandHandler : IRequestHandler<UpdateProductCommand,
             catch (ConcurrencyConflictException)
             {
                 _unitOfWork.DiscardChanges();
-                _logger.LogWarning(
-                    "Concurrency conflict updating product {ProductId}, attempt {Attempt}, retrying",
-                    request.Id, attempt);
+                _logger.LogWarning("Concurrency conflict updating product {ProductId}, attempt {Attempt}, retrying", request.Id, attempt);
             }
         }
 
-        return Result<ProductDto>.Failure(
-            "The product was updated concurrently too many times; please retry.",
-            ErrorCodes.ConcurrencyConflict);
+        return Result<ProductDto>.Failure("The product was updated concurrently too many times; please retry.", ErrorCodes.ConcurrencyConflict);
     }
 }

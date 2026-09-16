@@ -8,13 +8,13 @@ namespace ProductCatalog.Application.Products.Commands.DeleteProduct;
 
 public class DeleteProductCommandHandler : IRequestHandler<DeleteProductCommand, Result>
 {
-    private readonly IProductRepository _repository;
+    private readonly IProductRepository _productRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<DeleteProductCommandHandler> _logger;
 
-    public DeleteProductCommandHandler(IProductRepository repository, IUnitOfWork unitOfWork, ILogger<DeleteProductCommandHandler> logger)
+    public DeleteProductCommandHandler(IProductRepository productRepo, IUnitOfWork unitOfWork, ILogger<DeleteProductCommandHandler> logger)
     {
-        _repository = repository;
+        _productRepo = productRepo;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -23,16 +23,15 @@ public class DeleteProductCommandHandler : IRequestHandler<DeleteProductCommand,
     {
         for (var attempt = 1; attempt <= ConcurrencyPolicy.MaxConcurrencyRetries; attempt++)
         {
-            var product = await _repository.GetByIdAsync(request.Id, cancellationToken);
+            var product = await _productRepo.GetByIdAsync(request.Id, cancellationToken);
 
             if (product is null)
                 return Result.Failure($"Product {request.Id} was not found.", ErrorCodes.NotFound);
 
-            // Also reached after a conflict: the fresh read has a newer version, so If-Match requests get a 412.
             if (request.ExpectedVersion is not null && request.ExpectedVersion != product.GetVersion())
                 return Result.Failure("The product has changed since it was retrieved; reload it and try again.", ErrorCodes.VersionMismatch);
 
-            _repository.Remove(product);
+            _productRepo.Remove(product);
 
             try
             {
@@ -46,8 +45,6 @@ public class DeleteProductCommandHandler : IRequestHandler<DeleteProductCommand,
             }
         }
 
-        return Result.Failure(
-            "The product was updated concurrently too many times; please retry.",
-            ErrorCodes.ConcurrencyConflict);
+        return Result.Failure("The product was updated concurrently too many times; please retry.", ErrorCodes.ConcurrencyConflict);
     }
 }

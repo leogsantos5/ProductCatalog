@@ -23,8 +23,7 @@ public class GlobalExceptionHandler : IExceptionHandler
         {
             _logger.LogWarning("Request validation failed: {Message}", validationException.Message);
 
-            var errors = validationException.Errors.GroupBy(e => e.PropertyName)
-                .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray());
+            var errors = validationException.Errors.GroupBy(e => e.PropertyName).ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray());
 
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             problem = new ValidationProblemDetails(errors) { Status = StatusCodes.Status400BadRequest };
