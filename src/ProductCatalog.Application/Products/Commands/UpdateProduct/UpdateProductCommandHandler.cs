@@ -8,13 +8,13 @@ namespace ProductCatalog.Application.Products.Commands.UpdateProduct;
 
 public class UpdateProductCommandHandler : IRequestHandler<UpdateProductCommand, Result<ProductDto>>
 {
-    private readonly IProductRepository _productRepo;
+    private readonly IProductRepository _productsRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<UpdateProductCommandHandler> _logger;
 
-    public UpdateProductCommandHandler(IProductRepository productRepo, IUnitOfWork unitOfWork, ILogger<UpdateProductCommandHandler> logger)
+    public UpdateProductCommandHandler(IProductRepository productsRepo, IUnitOfWork unitOfWork, ILogger<UpdateProductCommandHandler> logger)
     {
-        _productRepo = productRepo;
+        _productsRepo = productsRepo;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -23,7 +23,7 @@ public class UpdateProductCommandHandler : IRequestHandler<UpdateProductCommand,
     {
         for (var attempt = 1; attempt <= ConcurrencyPolicy.MaxConcurrencyRetries; attempt++)
         {
-            var product = await _productRepo.GetByIdAsync(request.Id, cancellationToken);
+            var product = await _productsRepo.GetByIdAsync(request.Id, cancellationToken);
 
             if (product is null)
                 return Result<ProductDto>.Failure($"Product {request.Id} was not found.", ErrorCodes.NotFound);

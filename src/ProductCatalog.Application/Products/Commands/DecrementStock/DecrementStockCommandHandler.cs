@@ -6,14 +6,14 @@ namespace ProductCatalog.Application.Products.Commands.DecrementStock;
 
 public class DecrementStockCommandHandler : IRequestHandler<DecrementStockCommand, Result<ProductDto>>
 {
-    private readonly IProductRepository _productRepo;
+    private readonly IProductRepository _productsRepo;
 
-    public DecrementStockCommandHandler(IProductRepository productRepo) => _productRepo = productRepo;
+    public DecrementStockCommandHandler(IProductRepository productsRepo) => _productsRepo = productsRepo;
 
     public async Task<Result<ProductDto>> Handle(DecrementStockCommand request, CancellationToken cancellationToken)
     {
-        var decremented = await _productRepo.TryDecrementStockAsync(request.Id, request.Quantity, cancellationToken);
-        var product = await _productRepo.GetByIdAsync(request.Id, cancellationToken);
+        var decremented = await _productsRepo.TryDecrementStockAsync(request.Id, request.Quantity, cancellationToken);
+        var product = await _productsRepo.GetByIdAsync(request.Id, cancellationToken);
 
         if (product is null)
             return Result<ProductDto>.Failure($"Product {request.Id} was not found.", ErrorCodes.NotFound);
