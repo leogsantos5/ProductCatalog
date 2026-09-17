@@ -7,8 +7,7 @@ namespace ProductCatalog.Infrastructure.Persistence.Configurations;
 
 public class ProductConfiguration : IEntityTypeConfiguration<Product>
 {
-    private static readonly ValueConverter<DateTime, DateTime> UtcDateTimeConverter =
-        new(v => v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+    private static readonly ValueConverter<DateTime, DateTime> UtcDateTimeConverter = new(v => v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
 
     public void Configure(EntityTypeBuilder<Product> builder)
     {

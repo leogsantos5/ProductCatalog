@@ -12,8 +12,7 @@ public class ProductRepository : IProductRepository
 
     public ProductRepository(AppDbContext context) => _context = context;
 
-    public Task<Product?> GetByIdAsync(int id, CancellationToken ct = default) =>
-        _context.Products.FirstOrDefaultAsync(p => p.Id == id, ct);
+    public Task<Product?> GetByIdAsync(int id, CancellationToken ct = default) => _context.Products.FirstOrDefaultAsync(p => p.Id == id, ct);
 
     public Task<(IReadOnlyList<Product> Items, int TotalCount)> GetAllAsync(int page, int pageSize, CancellationToken ct = default) =>
         ToPageAsync(_context.Products.AsNoTracking(), page, pageSize, ct);
@@ -49,6 +48,7 @@ public class ProductRepository : IProductRepository
     {
         var now = DateTime.UtcNow;
 
+        // The WHERE clause rejects an addition that would overflow, so the check is atomic too.
         var affectedRows = await _context.Products.Where(p => p.Id == id && p.StockQuantity <= int.MaxValue - quantity)
                                                   .ExecuteUpdateAsync(s => s.SetProperty(p => p.StockQuantity, p => p.StockQuantity + quantity)
                                                                             .SetProperty(p => p.UpdatedAt, now), ct);

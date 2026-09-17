@@ -19,7 +19,10 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
     public CreateProductCommandHandler(IProductRepository productsRepo, IProductIdGenerator idGenerator,
                                        IUnitOfWork unitOfWork, ILogger<CreateProductCommandHandler> logger)
     {
-        _productsRepo = productsRepo; _idGenerator = idGenerator; _unitOfWork = unitOfWork; _logger = logger;
+        _productsRepo = productsRepo;
+        _idGenerator = idGenerator;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
     }
 
     public async Task<Result<ProductDto>> Handle(CreateProductCommand request, CancellationToken cancellationToken)
@@ -41,6 +44,8 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
             }
             catch (UniqueConstraintViolationException)
             {
+                // The failed insert leaves the entity tracked as Added; without detaching it, the next
+                // attempt would try to insert it again alongside the new one and collide every time.
                 _productsRepo.Remove(product);
                 _logger.LogWarning("Product ID {CandidateId} collided with a concurrently-created product on attempt {Attempt}, retrying", candidateId, attempt);
             }

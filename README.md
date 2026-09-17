@@ -34,6 +34,10 @@ Each use case has its own folder under `Application/Products/Commands` or `Queri
 command or query, its handler and its validator. Handlers only depend on `IProductRepository` and
 `IUnitOfWork`; EF Core stays inside `Infrastructure`.
 
+A request flows controller → MediatR handler → repository. The decisions worth reading are in
+`CreateProductCommandHandler` (retry on an ID collision), `ProductRepository.TryDecrementStockAsync`
+(atomic stock update) and `UpdateProductCommandHandler` (optimistic concurrency).
+
 ## Running locally
 
 **Prerequisites:** .NET 10 SDK and SQL Server LocalDB (included with Visual Studio, or available as
@@ -130,6 +134,35 @@ Successful responses are wrapped as `{ "data": ... }`, and every product include
 Every product carries a `version`, and responses for a single product also return it as an `ETag`
 header. `PUT` and `DELETE` accept it back in an optional `If-Match` header (see Concurrency below).
 
+```http
+POST /api/products
+{ "name": "ZEISS Single Vision Lens", "price": 89.90, "initialStock": 500 }
+
+201 Created
+ETag: "AAAAAAAAB9E="
+{ "data": { "id": 481920, "name": "ZEISS Single Vision Lens", "description": null, "price": 89.90,
+            "stockQuantity": 500, "createdAt": "2026-09-14T18:33:47Z",
+            "updatedAt": "2026-09-14T18:33:47Z", "version": "AAAAAAAAB9E=" } }
+```
+
+```json
+{ "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1", "title": "Bad Request",
+  "status": 400, "detail": "Insufficient stock: requested 5, available 3.",
+  "traceId": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+  "errorCode": "INSUFFICIENT_STOCK" }
+```
+
+## Assumptions
+
+- Stock is a single counter per product: no warehouses, reservations or back-orders, and
+  `decrement-stock` either succeeds in full or fails.
+- Deletes are permanent; there is no soft delete or audit trail.
+- Prices are stored as `decimal(18,2)` in a single, implicit currency.
+- Product names are not unique — only the ID identifies a product.
+- Stock changes only through the two stock endpoints; `PUT` covers the catalogue fields (name,
+  description and price).
+- The API is internal and trusted: no authentication, rate limiting or multi-tenancy.
+
 ## Design decisions
 
 - **Clean Architecture and CQRS for a single entity.** This is more structure than a CRUD this
@@ -153,8 +186,9 @@ header. `PUT` and `DELETE` accept it back in an optional `If-Match` header (see 
   considered. It needs no retries, but it runs out for good after 900,000 inserts, even if most of
   those products were deleted. Random IDs only get slower as the *live* ID space fills.
 
-- **Concurrency.** The brief doesn't ask for it, but several instances writing the same product at
-  once must not lose updates. Two techniques are used, depending on the kind of write:
+- **Concurrency.** Several instances writing the same product at once must not lose updates, and
+  stock must stay correct when requests overlap. Two techniques are used, depending on the kind of
+  write:
 
   - **Stock changes are a single atomic `UPDATE`.** `decrement-stock` and `add-to-stock` are
     relative changes, so the database applies them directly
@@ -199,6 +233,12 @@ header. `PUT` and `DELETE` accept it back in an optional `If-Match` header (see 
   because checking it in memory would bring back the read-then-write race. Correctness under
   concurrency was put ahead of keeping every rule inside the entity.
 
+- **EF Core usage.** Read-only queries use `AsNoTracking()`; `GetByIdAsync` keeps tracking because
+  update and delete mutate the entity they load. The repository is specific to `Product` rather than
+  a generic `Repository<T>`: it exposes only the queries this API needs, returns domain entities, and
+  keeps the two atomic stock updates in one place. Every call is asynchronous and threads the
+  request's `CancellationToken` from the controller through MediatR to EF Core.
+
 - **EF Core stays in Infrastructure.** `UnitOfWork` translates EF Core's concurrency and
   duplicate-key exceptions into the Application's own `ConcurrencyConflictException` and
   `UniqueConstraintViolationException`, so handlers can retry without referencing EF Core.
@@ -235,5 +275,21 @@ header. `PUT` and `DELETE` accept it back in an optional `If-Match` header (see 
 - There is no authentication or authorisation, as the brief doesn't ask for it.
 - `If-Match` supports a single strong ETag. Weak ETags or a list of ETags never match, so they get a 412.
 - Without `If-Match`, the last `PUT` wins.
+- The stock endpoints are not idempotent: a client that retries after a timeout decrements twice. An
+  `Idempotency-Key` header would be the usual fix.
 - Paging uses `OFFSET`/`FETCH`, which slows down on very deep pages; a very large catalogue would
   call for keyset (cursor) paging.
+
+## Where each requirement lives
+
+| Requirement | Where |
+|---|---|
+| The nine REST endpoints | `ProductsController`, with a ready-to-run request for each in `ProductCatalog.Api.http` |
+| Auto-generated 6-digit ID, unique across instances | `RandomProductIdGenerator`, the primary key, and the retry in `CreateProductCommandHandler` |
+| Validation on create and update | `[JsonRequired]` request contracts and the FluentValidation validators run by `ValidationBehaviour` |
+| Stock returned with every product | `ProductDto.StockQuantity` |
+| Code-first EF Core migrations | `Infrastructure/Migrations/InitialCreate` |
+| Database seeding | `DbSeeder`, run on startup in `Development` |
+| Unit tests | `tests/ProductCatalog.UnitTests` |
+| BDD tests (optional) | `tests/ProductCatalog.AcceptanceTests`, written in Gherkin and run with Reqnroll |
+| Documentation for running locally | "Running locally" above |

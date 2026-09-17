@@ -6,7 +6,6 @@ public interface IProductRepository
 {
     Task<Product?> GetByIdAsync(int id, CancellationToken ct = default);
 
-    // List methods return one page, ordered by ID, plus the total number of matches.
     Task<(IReadOnlyList<Product> Items, int TotalCount)> GetAllAsync(int page, int pageSize, CancellationToken ct = default);
     Task<(IReadOnlyList<Product> Items, int TotalCount)> SearchByNameAsync(string name, int page, int pageSize, CancellationToken ct = default);
     Task<(IReadOnlyList<Product> Items, int TotalCount)> GetByStockRangeAsync(int min, int max, int page, int pageSize, CancellationToken ct = default);

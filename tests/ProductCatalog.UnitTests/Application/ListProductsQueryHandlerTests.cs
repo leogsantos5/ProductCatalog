@@ -8,19 +8,19 @@ namespace ProductCatalog.UnitTests.Application;
 
 public class ListProductsQueryHandlerTests
 {
-    private readonly Mock<IProductRepository> _repository = new();
+    private readonly Mock<IProductRepository> _productsRepo = new();
     private readonly ListProductsQueryHandler _handler;
 
     public ListProductsQueryHandlerTests()
     {
-        _handler = new ListProductsQueryHandler(_repository.Object);
+        _handler = new ListProductsQueryHandler(_productsRepo.Object);
     }
 
     [Fact]
     public async Task Handle_RequestedPage_ReturnsItemsWithPagingMetadata()
     {
         IReadOnlyList<Product> secondPage = [Product.Create(100003, "Lens", null, 10m, 1), Product.Create(100004, "Frame", null, 20m, 2)];
-        _repository.Setup(r => r.GetAllAsync(2, 2, It.IsAny<CancellationToken>())).ReturnsAsync((secondPage, 5));
+        _productsRepo.Setup(r => r.GetAllAsync(2, 2, It.IsAny<CancellationToken>())).ReturnsAsync((secondPage, 5));
 
         var result = await _handler.Handle(new ListProductsQuery(Page: 2, PageSize: 2), CancellationToken.None);
 
@@ -35,7 +35,7 @@ public class ListProductsQueryHandlerTests
     [Fact]
     public async Task Handle_NoProducts_ReturnsEmptyPageWithZeroTotals()
     {
-        _repository.Setup(r => r.GetAllAsync(1, 50, It.IsAny<CancellationToken>())).ReturnsAsync(((IReadOnlyList<Product>)[], 0));
+        _productsRepo.Setup(r => r.GetAllAsync(1, 50, It.IsAny<CancellationToken>())).ReturnsAsync(((IReadOnlyList<Product>)[], 0));
 
         var result = await _handler.Handle(new ListProductsQuery(), CancellationToken.None);
 

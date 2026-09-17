@@ -11,7 +11,7 @@ namespace ProductCatalog.UnitTests.Application;
 
 public class UpdateProductCommandHandlerTests
 {
-    private readonly Mock<IProductRepository> _repository = new();
+    private readonly Mock<IProductRepository> _productsRepo = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
     private readonly UpdateProductCommandHandler _handler;
 
@@ -23,7 +23,7 @@ public class UpdateProductCommandHandlerTests
     public UpdateProductCommandHandlerTests()
     {
         _handler = new UpdateProductCommandHandler(
-            _repository.Object,
+            _productsRepo.Object,
             _unitOfWork.Object,
             Mock.Of<ILogger<UpdateProductCommandHandler>>());
     }
@@ -32,7 +32,7 @@ public class UpdateProductCommandHandlerTests
     public async Task Handle_ExistingProduct_UpdatesAndSaves()
     {
         var product = Product.Create(100001, "Mouse", "Old", 10m, 5);
-        _repository.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
+        _productsRepo.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
 
         var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m), CancellationToken.None);
 
@@ -45,7 +45,7 @@ public class UpdateProductCommandHandlerTests
     [Fact]
     public async Task Handle_ProductNotFound_ReturnsNotFound()
     {
-        _repository.Setup(r => r.GetByIdAsync(999999, It.IsAny<CancellationToken>())).ReturnsAsync((Product?)null);
+        _productsRepo.Setup(r => r.GetByIdAsync(999999, It.IsAny<CancellationToken>())).ReturnsAsync((Product?)null);
 
         var result = await _handler.Handle(new UpdateProductCommand(999999, "Mouse", null, 10m), CancellationToken.None);
 
@@ -57,17 +57,12 @@ public class UpdateProductCommandHandlerTests
     [Fact]
     public async Task Handle_ConcurrencyConflictOnce_DiscardsStaleStateAndRetriesOnFreshRead()
     {
-        // e.g. a stock change landed between the read and the save — the update is reapplied on top
-        // of it, keeping the fresh stock quantity.
         var stale = Product.Create(100001, "Mouse", "Old", 10m, 5);
         var fresh = Product.Create(100001, "Mouse", "Old", 10m, 4);
-        _repository.SetupSequence(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(stale)
-            .ReturnsAsync(fresh);
+        _productsRepo.SetupSequence(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(stale).ReturnsAsync(fresh);
 
         _unitOfWork.SetupSequence(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()))
-            .ReturnsAsync(1);
+                   .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception())).ReturnsAsync(1);
 
         var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m), CancellationToken.None);
 
@@ -81,12 +76,10 @@ public class UpdateProductCommandHandlerTests
     public async Task Handle_ProductDeletedDuringRetry_ReturnsNotFound()
     {
         var product = Product.Create(100001, "Mouse", "Old", 10m, 5);
-        _repository.SetupSequence(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product)
-            .ReturnsAsync((Product?)null);
+        _productsRepo.SetupSequence(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product).ReturnsAsync((Product?)null);
 
         _unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()));
+                   .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()));
 
         var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m), CancellationToken.None);
 
@@ -98,10 +91,10 @@ public class UpdateProductCommandHandlerTests
     public async Task Handle_ConcurrencyConflictExceedsRetries_ReturnsConcurrencyFailure()
     {
         var product = Product.Create(100001, "Mouse", "Old", 10m, 5);
-        _repository.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
+        _productsRepo.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
 
         _unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()));
+                   .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()));
 
         var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m), CancellationToken.None);
 
@@ -114,7 +107,7 @@ public class UpdateProductCommandHandlerTests
     public async Task Handle_ExpectedVersionMatches_UpdatesAndSaves()
     {
         var product = Product.Create(100001, "Mouse", "Old", 10m, 5).WithRowVersion(CurrentRowVersion);
-        _repository.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
+        _productsRepo.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
 
         var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m, CurrentVersion), CancellationToken.None);
 
@@ -126,7 +119,7 @@ public class UpdateProductCommandHandlerTests
     public async Task Handle_ExpectedVersionIsStale_ReturnsVersionMismatchWithoutSaving()
     {
         var product = Product.Create(100001, "Mouse", "Old", 10m, 5).WithRowVersion(CurrentRowVersion);
-        _repository.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
+        _productsRepo.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
 
         var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m, StaleVersion), CancellationToken.None);
 
@@ -139,13 +132,11 @@ public class UpdateProductCommandHandlerTests
     [Fact]
     public async Task Handle_ConcurrencyConflictWithExpectedVersion_ReturnsVersionMismatchInsteadOfRetrying()
     {
-        // The version matched on read, but another write landed before the save.
-        _repository.SetupSequence(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Product.Create(100001, "Mouse", "Old", 10m, 5).WithRowVersion(CurrentRowVersion))
-            .ReturnsAsync(Product.Create(100001, "Mouse", "Old", 10m, 4).WithRowVersion(NewerRowVersion));
+        _productsRepo.SetupSequence(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(Product.Create(100001, "Mouse", "Old", 10m, 5).WithRowVersion(CurrentRowVersion))
+                   .ReturnsAsync(Product.Create(100001, "Mouse", "Old", 10m, 4).WithRowVersion(NewerRowVersion));
 
-        _unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()));
+        _unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new ConcurrencyConflictException("conflict", new Exception()));
 
         var result = await _handler.Handle(new UpdateProductCommand(100001, "Wireless Mouse", "New", 25m, CurrentVersion), CancellationToken.None);
 
