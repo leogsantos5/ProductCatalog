@@ -13,7 +13,7 @@ public class DecrementStockCommandHandler : IRequestHandler<DecrementStockComman
     public async Task<Result<ProductDto>> Handle(DecrementStockCommand request, CancellationToken cancellationToken)
     {
         var decremented = await _productsRepo.TryDecrementStockAsync(request.Id, request.Quantity, cancellationToken);
-        var product = await _productsRepo.GetByIdAsync(request.Id, cancellationToken);
+        var product = await _productsRepo.GetByIdAsNoTrackingAsync(request.Id, cancellationToken);
 
         if (product is null)
             return Result<ProductDto>.Failure($"Product {request.Id} was not found.", ErrorCodes.NotFound);

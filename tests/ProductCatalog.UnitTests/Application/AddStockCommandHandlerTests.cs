@@ -21,7 +21,7 @@ public class AddStockCommandHandlerTests
     public async Task Handle_ExistingProduct_ReturnsProductAfterAddingStock()
     {
         _productsRepo.Setup(r => r.TryAddStockAsync(100001, 10, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        _productsRepo.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(Product.Create(100001, "Mouse", null, 10m, 15));
+        _productsRepo.Setup(r => r.GetByIdAsNoTrackingAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(Product.Create(100001, "Mouse", null, 10m, 15));
 
         var result = await _handler.Handle(new AddStockCommand(100001, 10), CancellationToken.None);
 
@@ -34,7 +34,7 @@ public class AddStockCommandHandlerTests
     public async Task Handle_ProductNotFound_ReturnsNotFound()
     {
         _productsRepo.Setup(r => r.TryAddStockAsync(999999, 10, It.IsAny<CancellationToken>())).ReturnsAsync(false);
-        _productsRepo.Setup(r => r.GetByIdAsync(999999, It.IsAny<CancellationToken>())).ReturnsAsync((Product?)null);
+        _productsRepo.Setup(r => r.GetByIdAsNoTrackingAsync(999999, It.IsAny<CancellationToken>())).ReturnsAsync((Product?)null);
 
         var result = await _handler.Handle(new AddStockCommand(999999, 10), CancellationToken.None);
 
@@ -46,7 +46,7 @@ public class AddStockCommandHandlerTests
     public async Task Handle_StockWouldOverflow_ReturnsStockLimitExceeded()
     {
         _productsRepo.Setup(r => r.TryAddStockAsync(100001, int.MaxValue, It.IsAny<CancellationToken>())).ReturnsAsync(false);
-        _productsRepo.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(Product.Create(100001, "Mouse", null, 10m, 5));
+        _productsRepo.Setup(r => r.GetByIdAsNoTrackingAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(Product.Create(100001, "Mouse", null, 10m, 5));
 
         var result = await _handler.Handle(new AddStockCommand(100001, int.MaxValue), CancellationToken.None);
 

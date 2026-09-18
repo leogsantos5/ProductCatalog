@@ -25,7 +25,6 @@ public class CreateProductCommandHandlerTests
     public async Task Handle_FirstCandidateFree_CreatesProductWithThatId()
     {
         _idGenerator.Setup(g => g.NextCandidate()).Returns(100001);
-        _productsRepo.Setup(r => r.ExistsAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         var command = new CreateProductCommand("Mouse", "A mouse", 19.99m, 10);
         var result = await _handler.Handle(command, CancellationToken.None);
@@ -38,26 +37,9 @@ public class CreateProductCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_IdAlreadyExists_RetriesWithNextCandidate()
-    {
-        _idGenerator.SetupSequence(g => g.NextCandidate()).Returns(100001).Returns(100002);
-
-        _productsRepo.SetupSequence(r => r.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(true).ReturnsAsync(false);
-
-        var command = new CreateProductCommand("Mouse", null, 19.99m, 10);
-        var result = await _handler.Handle(command, CancellationToken.None);
-
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.Id.Should().Be(100002);
-        _productsRepo.Verify(r => r.AddAsync(It.IsAny<Product>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
     public async Task Handle_SaveThrowsUniqueConstraintViolationOnce_RetriesAndSucceeds()
     {
         _idGenerator.SetupSequence(g => g.NextCandidate()).Returns(100001).Returns(100002);
-
-        _productsRepo.Setup(r => r.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         _unitOfWork.SetupSequence(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
                    .ThrowsAsync(new UniqueConstraintViolationException("collision", new Exception()))
@@ -76,13 +58,15 @@ public class CreateProductCommandHandlerTests
     public async Task Handle_AllCandidatesCollide_ReturnsIdGenerationFailure()
     {
         _idGenerator.Setup(g => g.NextCandidate()).Returns(100001);
-        _productsRepo.Setup(r => r.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
+                   .ThrowsAsync(new UniqueConstraintViolationException("collision", new Exception()));
 
         var command = new CreateProductCommand("Mouse", null, 19.99m, 10);
         var result = await _handler.Handle(command, CancellationToken.None);
 
         result.IsSuccess.Should().BeFalse();
         result.ErrorCode.Should().Be(ErrorCodes.IdGenerationFailed);
-        _productsRepo.Verify(r => r.AddAsync(It.IsAny<Product>(), It.IsAny<CancellationToken>()), Times.Never);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Exactly(10));
+        _productsRepo.Verify(r => r.Remove(It.IsAny<Product>()), Times.Exactly(10));
     }
 }

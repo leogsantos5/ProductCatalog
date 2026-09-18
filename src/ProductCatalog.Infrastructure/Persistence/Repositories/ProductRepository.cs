@@ -14,6 +14,9 @@ public class ProductRepository : IProductRepository
 
     public Task<Product?> GetByIdAsync(int id, CancellationToken ct = default) => _context.Products.FirstOrDefaultAsync(p => p.Id == id, ct);
 
+    public Task<Product?> GetByIdAsNoTrackingAsync(int id, CancellationToken ct = default) =>
+        _context.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+
     public Task<(IReadOnlyList<Product> Items, int TotalCount)> GetAllAsync(int page, int pageSize, CancellationToken ct = default) =>
         ToPageAsync(_context.Products.AsNoTracking(), page, pageSize, ct);
 
@@ -26,8 +29,6 @@ public class ProductRepository : IProductRepository
 
     public Task<(IReadOnlyList<Product> Items, int TotalCount)> GetByStockRangeAsync(int min, int max, int page, int pageSize, CancellationToken ct = default) =>
         ToPageAsync(_context.Products.AsNoTracking().Where(p => p.StockQuantity >= min && p.StockQuantity <= max), page, pageSize, ct);
-
-    public Task<bool> ExistsAsync(int id, CancellationToken ct = default) => _context.Products.AnyAsync(p => p.Id == id, ct);
 
     public async Task AddAsync(Product product, CancellationToken ct = default) => await _context.Products.AddAsync(product, ct);
 

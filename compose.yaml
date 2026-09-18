@@ -1,0 +1,17 @@
+# SQL Server for running the API and the acceptance tests without LocalDB (macOS, Linux, or Windows
+# without Visual Studio). Start it with `docker compose up -d --wait`; the README has the connection strings.
+# The password is a local development one, not a secret: the container is only reachable from localhost.
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64 # the image is x64 only; on Apple Silicon this runs under Rosetta
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "ProductCatalog_Dev1"
+    ports:
+      - "127.0.0.1:1433:1433"
+    healthcheck:
+      test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "ProductCatalog_Dev1", "-C", "-Q", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

@@ -21,7 +21,7 @@ public class GetProductByIdQueryHandlerTests
     public async Task Handle_ExistingProduct_ReturnsProduct()
     {
         var product = Product.Create(100001, "Mouse", "A mouse", 19.99m, 10);
-        _productsRepo.Setup(r => r.GetByIdAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
+        _productsRepo.Setup(r => r.GetByIdAsNoTrackingAsync(100001, It.IsAny<CancellationToken>())).ReturnsAsync(product);
 
         var result = await _handler.Handle(new GetProductByIdQuery(100001), CancellationToken.None);
 
@@ -34,7 +34,7 @@ public class GetProductByIdQueryHandlerTests
     [Fact]
     public async Task Handle_ProductNotFound_ReturnsNotFound()
     {
-        _productsRepo.Setup(r => r.GetByIdAsync(999999, It.IsAny<CancellationToken>())).ReturnsAsync((Product?)null);
+        _productsRepo.Setup(r => r.GetByIdAsNoTrackingAsync(999999, It.IsAny<CancellationToken>())).ReturnsAsync((Product?)null);
 
         var result = await _handler.Handle(new GetProductByIdQuery(999999), CancellationToken.None);
 

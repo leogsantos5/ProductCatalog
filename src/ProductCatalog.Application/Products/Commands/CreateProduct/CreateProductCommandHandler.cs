@@ -29,11 +29,8 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
     {
         for (var attempt = 1; attempt <= MaxIdGenerationAttempts; attempt++)
         {
+            // No existence check first: the primary key rejects a taken ID, and the catch below retries.
             var candidateId = _idGenerator.NextCandidate();
-
-            if (await _productsRepo.ExistsAsync(candidateId, cancellationToken))
-                continue;
-
             var product = Product.Create(candidateId, request.Name, request.Description, request.Price, request.InitialStock);
             await _productsRepo.AddAsync(product, cancellationToken);
 
@@ -44,10 +41,11 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
             }
             catch (UniqueConstraintViolationException)
             {
+                // Another product (possibly one created concurrently by another instance) has this ID.
                 // The failed insert leaves the entity tracked as Added; without detaching it, the next
                 // attempt would try to insert it again alongside the new one and collide every time.
                 _productsRepo.Remove(product);
-                _logger.LogWarning("Product ID {CandidateId} collided with a concurrently-created product on attempt {Attempt}, retrying", candidateId, attempt);
+                _logger.LogWarning("Product ID {CandidateId} is already taken (attempt {Attempt}), retrying", candidateId, attempt);
             }
         }
 

@@ -12,7 +12,7 @@ public class GetProductByIdQueryHandler : IRequestHandler<GetProductByIdQuery, R
 
     public async Task<Result<ProductDto>> Handle(GetProductByIdQuery request, CancellationToken cancellationToken)
     {
-        var product = await _productsRepo.GetByIdAsync(request.Id, cancellationToken);
+        var product = await _productsRepo.GetByIdAsNoTrackingAsync(request.Id, cancellationToken);
 
         return product is null ? Result<ProductDto>.Failure($"Product {request.Id} was not found.", ErrorCodes.NotFound) : Result<ProductDto>.Success(product.ToDto());
     }

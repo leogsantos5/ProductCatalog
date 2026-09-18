@@ -13,7 +13,7 @@ public class AddStockCommandHandler : IRequestHandler<AddStockCommand, Result<Pr
     public async Task<Result<ProductDto>> Handle(AddStockCommand request, CancellationToken cancellationToken)
     {
         var added = await _productsRepo.TryAddStockAsync(request.Id, request.Quantity, cancellationToken);
-        var product = await _productsRepo.GetByIdAsync(request.Id, cancellationToken);
+        var product = await _productsRepo.GetByIdAsNoTrackingAsync(request.Id, cancellationToken);
 
         if (product is null)
             return Result<ProductDto>.Failure($"Product {request.Id} was not found.", ErrorCodes.NotFound);

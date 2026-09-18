@@ -1,5 +1,7 @@
 # Product Catalog API
 
+[![CI](https://github.com/leogsantos5/ProductCatalog/actions/workflows/ci.yml/badge.svg)](https://github.com/leogsantos5/ProductCatalog/actions/workflows/ci.yml)
+
 A REST API for managing products: CRUD, stock management, and search by name or stock level. Built
 with ASP.NET Core and EF Core (code-first, SQL Server) as a take-home assessment.
 
@@ -40,8 +42,19 @@ A request flows controller → MediatR handler → repository. The decisions wor
 
 ## Running locally
 
-**Prerequisites:** .NET 10 SDK and SQL Server LocalDB (included with Visual Studio, or available as
-the standalone [SQL Server Express LocalDB](https://learn.microsoft.com/sql/database-engine/configure-windows/sql-server-express-localdb) installer).
+**Prerequisites:** the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), plus a
+SQL Server to connect to. Pick whichever fits your machine:
+
+| Your setup | SQL Server | Instructions |
+|---|---|---|
+| Windows with Visual Studio | SQL Server LocalDB (installed with Visual Studio, or as the standalone [SQL Server Express LocalDB](https://learn.microsoft.com/sql/database-engine/configure-windows/sql-server-express-localdb) installer) | [Option A](#option-a-windows-with-localdb-default): nothing to configure |
+| macOS, Linux, or Windows without LocalDB | A container, from `compose.yaml`. Needs Docker Desktop, or Docker Engine with the Compose plugin, **running** | [Option B](#option-b-docker-macos-linux-or-windows-without-localdb) |
+| Any OS, with a SQL Server already available | Your own instance | Set `ConnectionStrings__Default` to it, as in Option B |
+
+In the `Development` environment (the default for `dotnet run`) the API creates the database,
+applies migrations and seeds sample products on startup, so either option needs nothing else.
+
+### Option A: Windows with LocalDB (default)
 
 ```bash
 dotnet run --project src/ProductCatalog.Api
@@ -50,17 +63,57 @@ dotnet run --project src/ProductCatalog.Api
 Swagger UI is at `http://localhost:5077/swagger`, and
 `src/ProductCatalog.Api/ProductCatalog.Api.http` has a ready-to-run request for every endpoint.
 
-In the `Development` environment (the default for `dotnet run`) the API applies pending migrations
-and seeds sample products on startup, so a fresh clone needs nothing else. Outside `Development`
-this is skipped on purpose: migrations should be an explicit deployment step.
+The connection string is `ConnectionStrings:Default` in `src/ProductCatalog.Api/appsettings.json`.
+It points at LocalDB with Windows authentication, so there are no secrets.
+
+### Option B: Docker (macOS, Linux, or Windows without LocalDB)
+
+`compose.yaml` runs SQL Server in a container, and an environment variable points the API at it in
+place of LocalDB. `--wait` returns once SQL Server accepts connections, which takes 20–30 seconds
+(longer the first time, while the image downloads).
+
+bash / zsh (macOS, Linux):
+
+```bash
+docker compose up -d --wait
+export ConnectionStrings__Default="Server=127.0.0.1,1433;Database=ProductCatalog;User Id=sa;Password=ProductCatalog_Dev1;TrustServerCertificate=True"
+dotnet run --project src/ProductCatalog.Api
+```
+
+PowerShell (Windows):
+
+```powershell
+docker compose up -d --wait
+$env:ConnectionStrings__Default = "Server=127.0.0.1,1433;Database=ProductCatalog;User Id=sa;Password=ProductCatalog_Dev1;TrustServerCertificate=True"
+dotnet run --project src/ProductCatalog.Api
+```
+
+Swagger UI is then at `http://localhost:5077/swagger`, as in Option A.
+
+- The variable only lasts for the current terminal session, so set it again in a new terminal.
+- The connection string uses `127.0.0.1` rather than `localhost` on purpose. The container only
+  listens on IPv4 loopback, and where `localhost` resolves to IPv6 (`::1`) first, the connection
+  times out.
+- The SA password is a local development one, not a secret: nothing outside the machine can reach
+  the container.
+- Apple Silicon: the SQL Server image is x64 only, so `compose.yaml` requests `linux/amd64` and
+  Docker Desktop runs it under Rosetta. Check that "Use Rosetta for x86_64/amd64 emulation" is on in
+  Docker Desktop's settings (it is by default in recent versions).
+- `docker compose down` stops and removes the container. The database is not kept in a volume, so
+  the next `up` starts empty and the API seeds it again.
+
+### Database migrations
+
+Only needed outside `Development`, where startup deliberately skips migrations so they stay an
+explicit deployment step:
 
 ```bash
 dotnet tool install --global dotnet-ef
 dotnet ef database update --project src/ProductCatalog.Infrastructure --startup-project src/ProductCatalog.Api
 ```
 
-The connection string is `ConnectionStrings:Default` in `src/ProductCatalog.Api/appsettings.json`.
-It points at LocalDB with Windows authentication, so there are no secrets.
+`dotnet ef` reads the same configuration as the API, so with Docker, set `ConnectionStrings__Default`
+first as in Option B.
 
 ### Tests
 
@@ -68,15 +121,33 @@ It points at LocalDB with Windows authentication, so there are no secrets.
 dotnet test
 ```
 
-This runs both test projects. The acceptance tests need SQL Server LocalDB: they create their own
+This runs both test projects. The acceptance tests need SQL Server: they create their own
 `ProductCatalog_AcceptanceTests` database, empty it before every scenario and drop it at the end,
-so the development database is never touched.
+so the development database is never touched. They use LocalDB by default. To run them against the
+Docker container instead (after `docker compose up -d --wait`):
+
+bash / zsh (macOS, Linux):
+
+```bash
+export ACCEPTANCE_TESTS_CONNECTION_STRING="Server=127.0.0.1,1433;Database=ProductCatalog_AcceptanceTests;User Id=sa;Password=ProductCatalog_Dev1;TrustServerCertificate=True"
+dotnet test
+```
+
+PowerShell (Windows):
+
+```powershell
+$env:ACCEPTANCE_TESTS_CONNECTION_STRING = "Server=127.0.0.1,1433;Database=ProductCatalog_AcceptanceTests;User Id=sa;Password=ProductCatalog_Dev1;TrustServerCertificate=True"
+dotnet test
+```
+
+The [CI workflow](.github/workflows/ci.yml) does the same on every push, with SQL Server as a
+GitHub Actions service container.
 
 **Unit tests** (`tests/ProductCatalog.UnitTests`) run in memory, without a database:
 
 - **Domain:** `Product` rules (6-digit ID, name, positive price, non-negative initial stock).
 - **Handlers**, with the repository and unit of work mocked:
-  - create: ID already taken at the pre-check or at insert time, and running out of attempts;
+  - create: ID already taken at insert time (retried with a new ID), and running out of attempts;
   - update and delete: retry on a concurrency conflict using a fresh read, product deleted during
     the retry, retries exhausted, and `If-Match` (matching version, stale version, and a conflict
     after the check, which must end in 412 rather than overwrite);
@@ -178,8 +249,10 @@ ETag: "AAAAAAAAB9E="
 - **Unique 6-digit IDs across instances.** The application picks a random ID between 100000 and
   999999. The database primary key is what guarantees uniqueness: if two instances pick the same
   ID at the same moment, the second insert fails, and `CreateProductCommandHandler` retries with a
-  new ID (up to 10 attempts). A quick existence check before inserting avoids that failed insert in
-  the usual case.
+  new ID (up to 10 attempts). There is deliberately no existence check before inserting: the primary
+  key already catches every duplicate, and while the ID space is mostly empty a check would cost an
+  extra round trip on nearly every create to avoid a failed insert that almost never happens.
+  `RandomProductIdGenerator` documents this in the code as well.
 
   Six digits allow 900,000 IDs, so collisions become more likely as the table fills up. That is far
   beyond the scale of this exercise. A database sequence mapped onto the 6-digit range was also
@@ -233,8 +306,9 @@ ETag: "AAAAAAAAB9E="
   because checking it in memory would bring back the read-then-write race. Correctness under
   concurrency was put ahead of keeping every rule inside the entity.
 
-- **EF Core usage.** Read-only queries use `AsNoTracking()`; `GetByIdAsync` keeps tracking because
-  update and delete mutate the entity they load. The repository is specific to `Product` rather than
+- **EF Core usage.** Read-only queries use `AsNoTracking()`, including `GET /{id}` and the read
+  that builds the stock endpoints' response (`GetByIdAsNoTrackingAsync`). Only `GetByIdAsync` keeps
+  tracking, because update and delete mutate the entity they load. The repository is specific to `Product` rather than
   a generic `Repository<T>`: it exposes only the queries this API needs, returns domain entities, and
   keeps the two atomic stock updates in one place. Every call is asynchronous and threads the
   request's `CancellationToken` from the controller through MediatR to EF Core.
@@ -264,8 +338,8 @@ ETag: "AAAAAAAAB9E="
 - **Two layers of tests.** Unit tests pin down the business rules and retry logic quickly, using
   mocks. The BDD acceptance tests (the brief's optional item) describe the expected outcomes in plain
   language and check them against the real API and SQL Server, which is the only way to prove the
-  concurrency behaviour. They use LocalDB like the rest of the project; a CI pipeline would point
-  them at a containerised SQL Server instead.
+  concurrency behaviour. Locally they use LocalDB like the rest of the project; CI runs them against
+  SQL Server in a container, the same one `compose.yaml` provides outside Windows.
 
 - **Pinned package versions.** MediatR stays on 12.x and FluentAssertions on 7.x, the last releases
   before both moved to commercial licensing.
